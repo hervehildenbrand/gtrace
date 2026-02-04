@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/hervehildenbrand/gtr/internal/display"
+	"github.com/hervehildenbrand/gtr/internal/export"
+	"github.com/hervehildenbrand/gtr/internal/globalping"
 	"github.com/hervehildenbrand/gtr/internal/trace"
 	"github.com/hervehildenbrand/gtr/pkg/hop"
 	"github.com/spf13/cobra"
@@ -110,16 +113,60 @@ rich hop enrichment, and real-time TUI.`,
 
 // runTrace executes the traceroute based on configuration.
 func runTrace(cmd *cobra.Command, cfg *Config) error {
+	// Set up context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	var result *hop.TraceResult
+	var err error
+
+	// Use GlobalPing if --from is specified
+	if cfg.From != "" {
+		result, err = runGlobalPingTrace(ctx, cmd, cfg)
+	} else {
+		result, err = runLocalTrace(ctx, cmd, cfg)
+	}
+
+	if err != nil {
+		if ctx.Err() != nil {
+			fmt.Fprintln(cmd.OutOrStdout(), "\nTrace interrupted")
+			return nil
+		}
+		return err
+	}
+
+	// Export if output file specified
+	if cfg.Output != "" {
+		format := export.Format(cfg.Format)
+		if err := export.ExportToFile(cfg.Output, format, result); err != nil {
+			return fmt.Errorf("failed to export: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Results exported to %s\n", cfg.Output)
+	}
+
+	return nil
+}
+
+// runLocalTrace runs a local traceroute.
+func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.TraceResult, error) {
 	// Parse timeout
 	timeout, err := time.ParseDuration(cfg.Timeout)
 	if err != nil {
-		return fmt.Errorf("invalid timeout: %w", err)
+		return nil, fmt.Errorf("invalid timeout: %w", err)
 	}
 
 	// Resolve target
 	targetIP, err := trace.ResolveTarget(cfg.Target)
 	if err != nil {
-		return fmt.Errorf("failed to resolve target: %w", err)
+		return nil, fmt.Errorf("failed to resolve target: %w", err)
 	}
 
 	// Create trace config
@@ -134,20 +181,8 @@ func runTrace(cmd *cobra.Command, cfg *Config) error {
 	// Create tracer
 	tracer, err := trace.NewLocalTracer(traceCfg)
 	if err != nil {
-		return fmt.Errorf("failed to create tracer: %w", err)
+		return nil, fmt.Errorf("failed to create tracer: %w", err)
 	}
-
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancel()
-	}()
 
 	// Create renderer
 	renderer := display.NewSimpleRenderer()
@@ -163,11 +198,7 @@ func runTrace(cmd *cobra.Command, cfg *Config) error {
 
 	result, err := tracer.Trace(ctx, targetIP, callback)
 	if err != nil {
-		if ctx.Err() != nil {
-			fmt.Fprintln(cmd.OutOrStdout(), "\nTrace interrupted")
-			return nil
-		}
-		return fmt.Errorf("trace failed: %w", err)
+		return nil, fmt.Errorf("trace failed: %w", err)
 	}
 
 	// Print summary
@@ -179,5 +210,69 @@ func runTrace(cmd *cobra.Command, cfg *Config) error {
 			result.TotalHops())
 	}
 
-	return nil
+	return result, nil
+}
+
+// runGlobalPingTrace runs a traceroute via GlobalPing API.
+func runGlobalPingTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.TraceResult, error) {
+	// Create client
+	client := globalping.NewClient(cfg.APIKey)
+
+	// Parse locations
+	locations := globalping.ParseLocationStrings(cfg.From)
+
+	// Create measurement request
+	req := &globalping.MeasurementRequest{
+		Type:      globalping.MeasurementTypeTraceroute,
+		Target:    cfg.Target,
+		Locations: locations,
+		Options: globalping.MeasurementOptions{
+			Protocol: strings.ToUpper(cfg.Protocol),
+		},
+		InProgressUpdates: true,
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "traceroute to %s from %s via GlobalPing\n",
+		cfg.Target, cfg.From)
+	fmt.Fprintln(cmd.OutOrStdout(), "Creating measurement...")
+
+	// Create measurement
+	resp, err := client.CreateMeasurement(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create measurement: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Measurement ID: %s (%d probes)\n", resp.ID, resp.ProbesCount)
+	fmt.Fprintln(cmd.OutOrStdout(), "Waiting for results...")
+
+	// Wait for completion
+	measurement, err := client.WaitForMeasurement(ctx, resp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get results: %w", err)
+	}
+
+	// Create renderer
+	renderer := display.NewSimpleRenderer()
+
+	// Display results from each probe
+	var lastResult *hop.TraceResult
+	for _, pr := range measurement.Results {
+		result := pr.ToTraceResult(cfg.Target)
+		lastResult = result
+
+		fmt.Fprintf(cmd.OutOrStdout(), "\n=== From %s ===\n", result.Source)
+		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s (%s)\n\n", cfg.Target, result.TargetIP)
+
+		for _, h := range result.Hops {
+			fmt.Fprintln(cmd.OutOrStdout(), renderer.RenderHop(h))
+		}
+
+		if result.ReachedTarget {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nTarget reached in %d hops\n", result.TotalHops())
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nTarget not reached (%d hops)\n", result.TotalHops())
+		}
+	}
+
+	return lastResult, nil
 }

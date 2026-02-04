@@ -139,8 +139,16 @@ type TracerouteResult struct {
 }
 
 // TracerouteHop represents a single hop in the traceroute.
+// Supports both the simple format (resolvedAddress/resolvedHostname/timings)
+// and the detailed format with resolvers array.
 type TracerouteHop struct {
-	Resolvers []HopResolver `json:"resolvers"`
+	// Simple format fields
+	ResolvedAddress  string      `json:"resolvedAddress,omitempty"`
+	ResolvedHostname string      `json:"resolvedHostname,omitempty"`
+	Timings          []HopTiming `json:"timings,omitempty"`
+
+	// Detailed format fields
+	Resolvers []HopResolver `json:"resolvers,omitempty"`
 }
 
 // HopResolver contains information about a router at this hop.
@@ -161,6 +169,26 @@ type HopTiming struct {
 func (th *TracerouteHop) ToHop(ttl int) *hop.Hop {
 	h := hop.NewHop(ttl)
 
+	// Handle simple format (resolvedAddress + timings)
+	if th.ResolvedAddress != "" {
+		ip := net.ParseIP(th.ResolvedAddress)
+		if len(th.Timings) == 0 {
+			h.AddTimeout()
+		} else {
+			for _, t := range th.Timings {
+				rtt := time.Duration(t.RTT * float64(time.Millisecond))
+				h.AddProbe(ip, rtt)
+			}
+		}
+		if th.ResolvedHostname != "" {
+			h.SetEnrichment(hop.Enrichment{
+				Hostname: th.ResolvedHostname,
+			})
+		}
+		return h
+	}
+
+	// Handle detailed format with resolvers array
 	if len(th.Resolvers) == 0 {
 		// Timeout - no responses
 		h.AddTimeout()
