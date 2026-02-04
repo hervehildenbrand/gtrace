@@ -1,0 +1,19 @@
+# Binaries
+gtr
+*.exe
+
+# Test coverage
+coverage.out
+*.coverprofile
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MaxMind databases
+*.mmdb
