@@ -1,8 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
+	"github.com/hervehildenbrand/gtr/internal/display"
+	"github.com/hervehildenbrand/gtr/internal/trace"
+	"github.com/hervehildenbrand/gtr/pkg/hop"
 	"github.com/spf13/cobra"
 )
 
@@ -62,8 +70,7 @@ rich hop enrichment, and real-time TUI.`,
 				return nil
 			}
 
-			// TODO: Implement actual traceroute
-			return nil
+			return runTrace(cmd, &cfg)
 		},
 	}
 
@@ -99,4 +106,78 @@ rich hop enrichment, and real-time TUI.`,
 	cmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false, "Validate args without running trace")
 
 	return cmd
+}
+
+// runTrace executes the traceroute based on configuration.
+func runTrace(cmd *cobra.Command, cfg *Config) error {
+	// Parse timeout
+	timeout, err := time.ParseDuration(cfg.Timeout)
+	if err != nil {
+		return fmt.Errorf("invalid timeout: %w", err)
+	}
+
+	// Resolve target
+	targetIP, err := trace.ResolveTarget(cfg.Target)
+	if err != nil {
+		return fmt.Errorf("failed to resolve target: %w", err)
+	}
+
+	// Create trace config
+	traceCfg := &trace.Config{
+		Protocol:      trace.Protocol(cfg.Protocol),
+		MaxHops:       cfg.MaxHops,
+		PacketsPerHop: cfg.Packets,
+		Timeout:       timeout,
+		Port:          cfg.Port,
+	}
+
+	// Create tracer
+	tracer, err := trace.NewLocalTracer(traceCfg)
+	if err != nil {
+		return fmt.Errorf("failed to create tracer: %w", err)
+	}
+
+	// Set up context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	// Create renderer
+	renderer := display.NewSimpleRenderer()
+
+	// Print header
+	fmt.Fprintf(cmd.OutOrStdout(), "traceroute to %s (%s), %d hops max, %s protocol\n",
+		cfg.Target, targetIP, cfg.MaxHops, cfg.Protocol)
+
+	// Run trace with real-time output
+	callback := func(h *hop.Hop) {
+		fmt.Fprintln(cmd.OutOrStdout(), renderer.RenderHop(h))
+	}
+
+	result, err := tracer.Trace(ctx, targetIP, callback)
+	if err != nil {
+		if ctx.Err() != nil {
+			fmt.Fprintln(cmd.OutOrStdout(), "\nTrace interrupted")
+			return nil
+		}
+		return fmt.Errorf("trace failed: %w", err)
+	}
+
+	// Print summary
+	if result.ReachedTarget {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nTrace complete: reached %s in %d hops\n",
+			cfg.Target, result.TotalHops())
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nTrace complete: %d hops (target not reached)\n",
+			result.TotalHops())
+	}
+
+	return nil
 }

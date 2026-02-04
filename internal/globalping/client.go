@@ -1,0 +1,151 @@
+package globalping
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+)
+
+const (
+	// DefaultBaseURL is the GlobalPing API base URL.
+	DefaultBaseURL = "https://api.globalping.io"
+
+	// DefaultPollInterval is the default interval for polling measurement status.
+	DefaultPollInterval = 500 * time.Millisecond
+
+	// DefaultTimeout is the default HTTP client timeout.
+	DefaultTimeout = 30 * time.Second
+)
+
+// Client is a GlobalPing API client.
+type Client struct {
+	baseURL      string
+	apiKey       string
+	httpClient   *http.Client
+	pollInterval time.Duration
+}
+
+// NewClient creates a new GlobalPing API client.
+func NewClient(apiKey string) *Client {
+	return &Client{
+		baseURL: DefaultBaseURL,
+		apiKey:  apiKey,
+		httpClient: &http.Client{
+			Timeout: DefaultTimeout,
+		},
+		pollInterval: DefaultPollInterval,
+	}
+}
+
+// CreateMeasurement creates a new measurement.
+func (c *Client) CreateMeasurement(ctx context.Context, req *MeasurementRequest) (*MeasurementResponse, error) {
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid request: %w", err)
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/v1/measurements", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.setHeaders(httpReq)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result MeasurementResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// GetMeasurement retrieves the current state of a measurement.
+func (c *Client) GetMeasurement(ctx context.Context, id string) (*MeasurementResult, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v1/measurements/"+id, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.setHeaders(httpReq)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result MeasurementResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// WaitForMeasurement polls until the measurement is complete.
+func (c *Client) WaitForMeasurement(ctx context.Context, id string) (*MeasurementResult, error) {
+	ticker := time.NewTicker(c.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		result, err := c.GetMeasurement(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+
+		if result.Status.IsComplete() {
+			return result, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			// Continue polling
+		}
+	}
+}
+
+// RunMeasurement creates a measurement and waits for completion.
+func (c *Client) RunMeasurement(ctx context.Context, req *MeasurementRequest) (*MeasurementResult, error) {
+	resp, err := c.CreateMeasurement(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create measurement: %w", err)
+	}
+
+	return c.WaitForMeasurement(ctx, resp.ID)
+}
+
+// setHeaders sets common request headers.
+func (c *Client) setHeaders(req *http.Request) {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+}
