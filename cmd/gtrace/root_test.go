@@ -422,3 +422,21 @@ func TestRootCommand_ParsesCyclesFlag(t *testing.T) {
 		t.Errorf("expected cycles 10, got %d", cycles)
 	}
 }
+
+func TestRootCommand_CompareRequiresFrom(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	// --compare without --from should error
+	cmd.SetArgs([]string{"google.com", "--compare", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error when --compare is used without --from")
+	}
+	if !strings.Contains(err.Error(), "--from") {
+		t.Errorf("error should mention --from, got: %v", err)
+	}
+}

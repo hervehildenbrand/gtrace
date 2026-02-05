@@ -82,6 +82,11 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 			if !validProtocols[cfg.Protocol] {
 				return fmt.Errorf("invalid protocol %q: must be icmp, udp, or tcp", cfg.Protocol)
 			}
+
+			// --compare requires --from
+			if cfg.Compare && cfg.From == "" {
+				return fmt.Errorf("--compare requires --from to specify remote location")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -182,6 +187,11 @@ func runTrace(cmd *cobra.Command, cfg *Config) error {
 			return nil
 		}
 		return err
+	}
+
+	// Compare mode: run local and remote traces concurrently
+	if cfg.Compare && cfg.From != "" {
+		return runCompareMode(ctx, cmd, cfg)
 	}
 
 	var result *hop.TraceResult
@@ -496,6 +506,155 @@ func runGlobalPingTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*
 	}
 
 	return lastResult, nil
+}
+
+// runCompareMode runs local and remote traces concurrently and displays side-by-side.
+func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
+	fmt.Fprintf(cmd.OutOrStdout(), "Comparing traces to %s (local vs %s)\n", cfg.Target, cfg.From)
+	fmt.Fprintln(cmd.OutOrStdout(), "Running traces concurrently...")
+
+	var localResult, remoteResult *hop.TraceResult
+	var localErr, remoteErr error
+	var wg sync.WaitGroup
+
+	// Run both traces concurrently
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		// Force simple mode for local trace in compare mode
+		localCfg := *cfg
+		localCfg.Simple = true
+		localCfg.From = "" // Clear to run local
+		localResult, localErr = runLocalTraceForCompare(ctx, &localCfg)
+	}()
+
+	go func() {
+		defer wg.Done()
+		remoteResult, remoteErr = runGlobalPingTraceForCompare(ctx, cfg)
+	}()
+
+	wg.Wait()
+
+	// Check for errors
+	if localErr != nil && remoteErr != nil {
+		return fmt.Errorf("both traces failed: local=%v, remote=%v", localErr, remoteErr)
+	}
+
+	// Display comparison if we have at least one result
+	if localResult == nil && remoteResult == nil {
+		return fmt.Errorf("no trace results available")
+	}
+
+	// Handle partial results
+	if localResult == nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nLocal trace failed: %v\n", localErr)
+		localResult = hop.NewTraceResult(cfg.Target, "")
+		localResult.Source = "Local"
+	}
+	if remoteResult == nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nRemote trace failed: %v\n", remoteErr)
+		remoteResult = hop.NewTraceResult(cfg.Target, "")
+		remoteResult.Source = cfg.From
+	}
+
+	// Set source labels
+	localResult.Source = "Local"
+
+	fmt.Fprintln(cmd.OutOrStdout())
+
+	// Render comparison
+	renderer := display.NewCompareRenderer(cmd.OutOrStdout(), cfg.NoColor)
+	return renderer.Render(localResult, remoteResult, cfg.From)
+}
+
+// runLocalTraceForCompare runs a local trace for compare mode (simple output, no TUI).
+func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult, error) {
+	// Parse timeout
+	timeout, err := time.ParseDuration(cfg.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("invalid timeout: %w", err)
+	}
+
+	// Resolve target
+	targetIP, err := trace.ResolveTarget(cfg.Target)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve target: %w", err)
+	}
+
+	// Create trace config
+	traceCfg := &trace.Config{
+		Protocol:      trace.Protocol(cfg.Protocol),
+		MaxHops:       cfg.MaxHops,
+		PacketsPerHop: cfg.Packets,
+		Timeout:       timeout,
+		Port:          cfg.Port,
+	}
+
+	// Create tracer
+	tracer, err := trace.NewLocalTracer(traceCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tracer: %w", err)
+	}
+
+	// Create enricher (unless offline mode)
+	var enricher *enrich.Enricher
+	if !cfg.Offline {
+		enricher = enrich.NewEnricher()
+	}
+
+	// Run trace silently (no output during trace)
+	result, err := tracer.Trace(ctx, targetIP, func(h *hop.Hop) {
+		if enricher != nil {
+			enricher.EnrichHop(ctx, h)
+		}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("trace failed: %w", err)
+	}
+
+	result.TargetIP = targetIP.String()
+	return result, nil
+}
+
+// runGlobalPingTraceForCompare runs a GlobalPing trace for compare mode (returns result only).
+func runGlobalPingTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult, error) {
+	// Create client
+	client := globalping.NewClient(cfg.APIKey)
+
+	// Parse locations
+	locations := globalping.ParseLocationStrings(cfg.From)
+
+	// Create measurement request
+	req := &globalping.MeasurementRequest{
+		Type:      globalping.MeasurementTypeTraceroute,
+		Target:    cfg.Target,
+		Locations: locations,
+		Options: globalping.MeasurementOptions{
+			Protocol: strings.ToUpper(cfg.Protocol),
+		},
+		InProgressUpdates: true,
+	}
+
+	// Create measurement
+	resp, err := client.CreateMeasurement(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create measurement: %w", err)
+	}
+
+	// Wait for completion
+	measurement, err := client.WaitForMeasurement(ctx, resp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get results: %w", err)
+	}
+
+	// Return first probe result
+	if len(measurement.Results) == 0 {
+		return nil, fmt.Errorf("no probe results")
+	}
+
+	result := measurement.Results[0].ToTraceResult(cfg.Target)
+	return result, nil
 }
 
 // parseLatencyThreshold parses a latency threshold string (e.g., "100ms", "1s").
