@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/hervehildenbrand/gtrace/internal/globalping"
 )
 
 func TestRootCommand_RequiresTarget(t *testing.T) {
@@ -532,5 +534,75 @@ func TestGetIPVersion_IPv6Only(t *testing.T) {
 	cfg := &Config{IPv6Only: true}
 	if v := getIPVersion(cfg); v != 6 {
 		t.Errorf("expected 6 for IPv6Only, got %d", v)
+	}
+}
+
+func TestDisplayMTRHop_ShowsASN(t *testing.T) {
+	buf := new(bytes.Buffer)
+	mh := &globalping.MTRHop{
+		ResolvedAddress:  "80.10.255.25",
+		ResolvedHostname: "host.example.net",
+		ASN:              []uint32{3215},
+		Stats: globalping.MTRStats{
+			Loss:  0.0,
+			Total: 3,
+			Rcv:   3,
+			Min:   0.5,
+			Avg:   0.7,
+			Max:   1.1,
+		},
+	}
+
+	displayMTRHop(buf, 2, mh)
+
+	output := buf.String()
+	if !strings.Contains(output, "[AS3215]") {
+		t.Errorf("expected output to contain '[AS3215]', got: %q", output)
+	}
+}
+
+func TestDisplayMTRHop_NoASN(t *testing.T) {
+	buf := new(bytes.Buffer)
+	mh := &globalping.MTRHop{
+		ResolvedAddress: "192.168.1.1",
+		ASN:             []uint32{},
+		Stats: globalping.MTRStats{
+			Loss:  0.0,
+			Total: 3,
+			Rcv:   3,
+			Min:   0.5,
+			Avg:   0.7,
+			Max:   1.1,
+		},
+	}
+
+	displayMTRHop(buf, 1, mh)
+
+	output := buf.String()
+	if strings.Contains(output, "[AS") {
+		t.Errorf("expected no ASN in output, got: %q", output)
+	}
+}
+
+func TestDisplayMTRHop_MultipleASNs_ShowsFirst(t *testing.T) {
+	buf := new(bytes.Buffer)
+	mh := &globalping.MTRHop{
+		ResolvedAddress: "1.1.1.1",
+		ASN:             []uint32{13335, 15169},
+		Stats: globalping.MTRStats{
+			Loss:  0.0,
+			Total: 3,
+			Rcv:   3,
+			Min:   0.5,
+			Avg:   0.7,
+			Max:   1.1,
+		},
+	}
+
+	displayMTRHop(buf, 1, mh)
+
+	output := buf.String()
+	if !strings.Contains(output, "[AS13335]") {
+		t.Errorf("expected output to contain '[AS13335]', got: %q", output)
 	}
 }

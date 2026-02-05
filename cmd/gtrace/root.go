@@ -659,8 +659,14 @@ func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
 			host = host[:17] + "..."
 		}
 
-		fmt.Fprintf(w, "%3d  %-20s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
-			ttl, host,
+		// Format ASN if available
+		asnStr := ""
+		if len(mh.ASN) > 0 && mh.ASN[0] > 0 {
+			asnStr = fmt.Sprintf(" [AS%d]", mh.ASN[0])
+		}
+
+		fmt.Fprintf(w, "%3d  %-20s%s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
+			ttl, host, asnStr,
 			mh.Stats.Loss,
 			mh.Stats.Total,
 			mh.Stats.Rcv,
