@@ -607,6 +607,25 @@ func TestDisplayMTRHop_MultipleASNs_ShowsFirst(t *testing.T) {
 	}
 }
 
+func TestDisplayMTRHop_LongHostnameWithASN_ShowsBoth(t *testing.T) {
+	buf := new(bytes.Buffer)
+	mh := &globalping.MTRHop{
+		ResolvedAddress:  "129.250.2.133",
+		ResolvedHostname: "ae-1.r22.sydnau05.au.bb.gin.ntt.net",
+		ASN:              []uint32{2914},
+		Stats: globalping.MTRStats{
+			Loss: 0.0, Total: 3, Rcv: 3, Min: 0.6, Avg: 0.7, Max: 0.7,
+		},
+	}
+
+	displayMTRHop(buf, 11, mh)
+
+	output := buf.String()
+	if !strings.Contains(output, "[AS2914]") {
+		t.Errorf("ASN tag must not be truncated, got: %q", output)
+	}
+}
+
 func TestDisplayMTRHop_ColumnsAligned(t *testing.T) {
 	// Hop with ASN and hop without ASN should have stats at the same column position
 	withASN := new(bytes.Buffer)

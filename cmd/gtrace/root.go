@@ -655,15 +655,19 @@ func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
 			host = mh.ResolvedHostname
 		}
 
-		// Build combined host + ASN label
-		hostLabel := host
+		// Build combined host + ASN label, truncating hostname to preserve ASN
+		const colWidth = 30
+		asnTag := ""
 		if len(mh.ASN) > 0 && mh.ASN[0] > 0 {
-			asnTag := fmt.Sprintf("[AS%d]", mh.ASN[0])
-			hostLabel = host + " " + asnTag
+			asnTag = fmt.Sprintf(" [AS%d]", mh.ASN[0])
 		}
-		// Truncate if too long for the column
-		if len(hostLabel) > 30 {
-			hostLabel = hostLabel[:27] + "..."
+		maxHost := colWidth - len(asnTag)
+		if len(host) > maxHost {
+			host = host[:maxHost-3] + "..."
+		}
+		hostLabel := host + asnTag
+		if len(hostLabel) > colWidth {
+			hostLabel = hostLabel[:colWidth]
 		}
 
 		fmt.Fprintf(w, "%3d  %-30s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
@@ -689,13 +693,19 @@ func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
 		if r.Hostname != "" && r.Hostname != r.Address {
 			host = r.Hostname
 		}
-		// Build combined host + ASN label
-		hostLabel := host
+		// Build combined host + ASN label, truncating hostname to preserve ASN
+		const colWidth = 30
+		asnTag := ""
 		if r.ASN > 0 {
-			hostLabel = fmt.Sprintf("%s [AS%d]", host, r.ASN)
+			asnTag = fmt.Sprintf(" [AS%d]", r.ASN)
 		}
-		if len(hostLabel) > 30 {
-			hostLabel = hostLabel[:27] + "..."
+		maxHost := colWidth - len(asnTag)
+		if len(host) > maxHost {
+			host = host[:maxHost-3] + "..."
+		}
+		hostLabel := host + asnTag
+		if len(hostLabel) > colWidth {
+			hostLabel = hostLabel[:colWidth]
 		}
 
 		fmt.Fprintf(w, "%3d  %-30s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
