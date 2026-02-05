@@ -138,3 +138,69 @@ func TestASNLookup_Lookup_ReturnsRealData(t *testing.T) {
 		t.Errorf("expected ASN 15169 (Google), got %d", result.ASN)
 	}
 }
+
+func TestASNLookup_FormatQueryV6_NibbleReverses(t *testing.T) {
+	lookup := NewASNLookup()
+
+	// Google Public DNS IPv6: 2001:4860:4860::8888
+	query := lookup.formatQueryV6(net.ParseIP("2001:4860:4860::8888"))
+
+	expected := "8.8.8.8.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.6.8.4.0.6.8.4.1.0.0.2.origin6.asn.cymru.com"
+	if query != expected {
+		t.Errorf("expected %q, got %q", expected, query)
+	}
+}
+
+func TestASNLookup_FormatQueryV6_FullAddress(t *testing.T) {
+	lookup := NewASNLookup()
+
+	// Full IPv6 address
+	query := lookup.formatQueryV6(net.ParseIP("2606:4700:4700::1111"))
+
+	// 2606:4700:4700::1111 expands to 2606:4700:4700:0000:0000:0000:0000:1111
+	expected := "1.1.1.1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.7.4.0.0.7.4.6.0.6.2.origin6.asn.cymru.com"
+	if query != expected {
+		t.Errorf("expected %q, got %q", expected, query)
+	}
+}
+
+func TestASNLookup_DetectsIPv6(t *testing.T) {
+	lookup := NewASNLookup()
+
+	// IPv4 should use formatQuery (ends with origin.asn.cymru.com)
+	v4Query := lookup.formatQueryForIP(net.ParseIP("8.8.8.8"))
+	if v4Query != "8.8.8.8.origin.asn.cymru.com" {
+		t.Errorf("expected IPv4 query, got %q", v4Query)
+	}
+
+	// IPv6 should use formatQueryV6 (ends with origin6.asn.cymru.com)
+	v6Query := lookup.formatQueryForIP(net.ParseIP("2001:4860:4860::8888"))
+	if v6Query == "" {
+		t.Error("expected non-empty IPv6 query")
+	}
+	if v6Query[len(v6Query)-len("origin6.asn.cymru.com"):] != "origin6.asn.cymru.com" {
+		t.Errorf("expected IPv6 query to end with origin6.asn.cymru.com, got %q", v6Query)
+	}
+}
+
+// Integration test for IPv6 - skip if no network
+func TestASNLookup_Lookup_IPv6(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	lookup := NewASNLookup()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Google DNS IPv6 - well-known ASN
+	result, err := lookup.Lookup(ctx, net.ParseIP("2001:4860:4860::8888"))
+
+	if err != nil {
+		t.Fatalf("lookup failed: %v", err)
+	}
+	// Google's ASN should be returned
+	if result.ASN == 0 {
+		t.Error("expected non-zero ASN for Google IPv6 DNS")
+	}
+}

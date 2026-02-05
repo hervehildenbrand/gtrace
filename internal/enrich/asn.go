@@ -37,6 +37,7 @@ func NewASNLookup() *ASNLookup {
 
 // Lookup performs an ASN lookup for the given IP.
 // Uses Team Cymru DNS first, falls back to ip-api.com for better coverage.
+// Supports both IPv4 and IPv6 addresses.
 func (l *ASNLookup) Lookup(ctx context.Context, ip net.IP) (*ASNResult, error) {
 	if ip == nil {
 		return nil, errors.New("nil IP address")
@@ -47,26 +48,25 @@ func (l *ASNLookup) Lookup(ctx context.Context, ip net.IP) (*ASNResult, error) {
 		return nil, errors.New("private IP address")
 	}
 
-	// Only IPv4 for now
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return nil, errors.New("IPv6 not yet supported")
-	}
-
 	// Try Team Cymru DNS first
-	result, err := l.lookupCymru(ctx, ip4)
+	result, err := l.lookupCymru(ctx, ip)
 	if err == nil && result.ASN > 0 {
 		return result, nil
 	}
 
-	// Fallback to ip-api.com for better coverage
+	// Fallback to ip-api.com for better coverage (supports IPv6)
 	return l.lookupIPAPI(ctx, ip)
 }
 
 // lookupCymru performs ASN lookup via Team Cymru DNS.
-func (l *ASNLookup) lookupCymru(ctx context.Context, ip4 net.IP) (*ASNResult, error) {
-	// Query origin ASN
-	query := l.formatQuery(ip4)
+// Supports both IPv4 and IPv6 addresses.
+func (l *ASNLookup) lookupCymru(ctx context.Context, ip net.IP) (*ASNResult, error) {
+	// Query origin ASN using appropriate format
+	query := l.formatQueryForIP(ip)
+	if query == "" {
+		return nil, errors.New("failed to format query")
+	}
+
 	records, err := l.resolver.LookupTXT(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup failed: %w", err)
@@ -155,7 +155,7 @@ func (l *ASNLookup) lookupIPAPI(ctx context.Context, ip net.IP) (*ASNResult, err
 	}, nil
 }
 
-// formatQuery creates the DNS query for IP to ASN lookup.
+// formatQuery creates the DNS query for IPv4 to ASN lookup.
 // Format: reversed octets + ".origin.asn.cymru.com"
 func (l *ASNLookup) formatQuery(ip net.IP) string {
 	ip4 := ip.To4()
@@ -164,6 +164,38 @@ func (l *ASNLookup) formatQuery(ip net.IP) string {
 	}
 	return fmt.Sprintf("%d.%d.%d.%d.origin.asn.cymru.com",
 		ip4[3], ip4[2], ip4[1], ip4[0])
+}
+
+// formatQueryV6 creates the DNS query for IPv6 to ASN lookup.
+// Format: nibble-reversed + ".origin6.asn.cymru.com"
+// Example: 2001:4860:4860::8888 → 8.8.8.8.0.0.0.0...1.0.0.2.origin6.asn.cymru.com
+func (l *ASNLookup) formatQueryV6(ip net.IP) string {
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return ""
+	}
+	// If it's actually an IPv4-mapped address, format as IPv4
+	if ip.To4() != nil {
+		return l.formatQuery(ip)
+	}
+
+	var parts []string
+	for i := len(ip16) - 1; i >= 0; i-- {
+		// Each byte contributes 2 nibbles (4 bits each)
+		// Low nibble first, then high nibble (reversed)
+		parts = append(parts, fmt.Sprintf("%x", ip16[i]&0x0f))
+		parts = append(parts, fmt.Sprintf("%x", ip16[i]>>4))
+	}
+	return strings.Join(parts, ".") + ".origin6.asn.cymru.com"
+}
+
+// formatQueryForIP creates the DNS query for the given IP address.
+// Automatically selects IPv4 or IPv6 format based on address type.
+func (l *ASNLookup) formatQueryForIP(ip net.IP) string {
+	if ip.To4() != nil {
+		return l.formatQuery(ip)
+	}
+	return l.formatQueryV6(ip)
 }
 
 // parseResponse parses the Team Cymru TXT response.
