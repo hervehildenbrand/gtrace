@@ -606,3 +606,37 @@ func TestDisplayMTRHop_MultipleASNs_ShowsFirst(t *testing.T) {
 		t.Errorf("expected output to contain '[AS13335]', got: %q", output)
 	}
 }
+
+func TestDisplayMTRHop_ColumnsAligned(t *testing.T) {
+	// Hop with ASN and hop without ASN should have stats at the same column position
+	withASN := new(bytes.Buffer)
+	mhWith := &globalping.MTRHop{
+		ResolvedAddress: "80.10.255.25",
+		ASN:             []uint32{3215},
+		Stats: globalping.MTRStats{
+			Loss: 0.0, Total: 3, Rcv: 3, Min: 0.5, Avg: 0.7, Max: 1.1,
+		},
+	}
+	displayMTRHop(withASN, 2, mhWith)
+
+	withoutASN := new(bytes.Buffer)
+	mhWithout := &globalping.MTRHop{
+		ResolvedAddress: "192.168.1.1",
+		ASN:             []uint32{},
+		Stats: globalping.MTRStats{
+			Loss: 0.0, Total: 3, Rcv: 3, Min: 0.5, Avg: 0.7, Max: 1.1,
+		},
+	}
+	displayMTRHop(withoutASN, 1, mhWithout)
+
+	// Find the position of "0.0%" (the Loss column) in each output
+	outWith := withASN.String()
+	outWithout := withoutASN.String()
+	posWith := strings.Index(outWith, "0.0%")
+	posWithout := strings.Index(outWithout, "0.0%")
+
+	if posWith != posWithout {
+		t.Errorf("columns misaligned: with ASN Loss%% at position %d, without ASN at %d\nwith:    %q\nwithout: %q",
+			posWith, posWithout, outWith, outWithout)
+	}
+}

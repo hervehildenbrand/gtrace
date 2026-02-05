@@ -628,7 +628,7 @@ func runGlobalPingMTR(ctx context.Context, cmd *cobra.Command, cfg *Config) (*ho
 		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s (%s)\n\n", cfg.Target, result.TargetIP)
 
 		// Display MTR-style header
-		fmt.Fprintf(cmd.OutOrStdout(), "%-3s  %-20s  %6s  %5s  %5s  %8s  %8s  %8s\n",
+		fmt.Fprintf(cmd.OutOrStdout(), "%-3s  %-30s  %6s  %5s  %5s  %8s  %8s  %8s\n",
 			"Hop", "Host", "Loss%", "Sent", "Recv", "Best", "Avg", "Worst")
 
 		// Display each hop with MTR stats
@@ -654,19 +654,20 @@ func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
 		if mh.ResolvedHostname != "" && mh.ResolvedHostname != mh.ResolvedAddress {
 			host = mh.ResolvedHostname
 		}
-		// Truncate long hostnames
-		if len(host) > 20 {
-			host = host[:17] + "..."
-		}
 
-		// Format ASN if available
-		asnStr := ""
+		// Build combined host + ASN label
+		hostLabel := host
 		if len(mh.ASN) > 0 && mh.ASN[0] > 0 {
-			asnStr = fmt.Sprintf(" [AS%d]", mh.ASN[0])
+			asnTag := fmt.Sprintf("[AS%d]", mh.ASN[0])
+			hostLabel = host + " " + asnTag
+		}
+		// Truncate if too long for the column
+		if len(hostLabel) > 30 {
+			hostLabel = hostLabel[:27] + "..."
 		}
 
-		fmt.Fprintf(w, "%3d  %-20s%s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
-			ttl, host, asnStr,
+		fmt.Fprintf(w, "%3d  %-30s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
+			ttl, hostLabel,
 			mh.Stats.Loss,
 			mh.Stats.Total,
 			mh.Stats.Rcv,
@@ -678,7 +679,7 @@ func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
 
 	// Handle legacy format with resolvers array
 	if len(mh.Resolvers) == 0 {
-		fmt.Fprintf(w, "%3d  %-20s  %6s  %5s  %5s  %8s  %8s  %8s\n",
+		fmt.Fprintf(w, "%3d  %-30s  %6s  %5s  %5s  %8s  %8s  %8s\n",
 			ttl, "???", "-", "-", "-", "-", "-", "-")
 		return
 	}
@@ -688,12 +689,17 @@ func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
 		if r.Hostname != "" && r.Hostname != r.Address {
 			host = r.Hostname
 		}
-		if len(host) > 20 {
-			host = host[:17] + "..."
+		// Build combined host + ASN label
+		hostLabel := host
+		if r.ASN > 0 {
+			hostLabel = fmt.Sprintf("%s [AS%d]", host, r.ASN)
+		}
+		if len(hostLabel) > 30 {
+			hostLabel = hostLabel[:27] + "..."
 		}
 
-		fmt.Fprintf(w, "%3d  %-20s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
-			ttl, host,
+		fmt.Fprintf(w, "%3d  %-30s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
+			ttl, hostLabel,
 			r.Stats.Loss,
 			r.Stats.Total,
 			r.Stats.Rcv,
