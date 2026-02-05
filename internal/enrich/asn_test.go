@@ -2,7 +2,10 @@ package enrich
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -115,6 +118,213 @@ func TestASNLookup_ParseASNName_ExtractsOrgName(t *testing.T) {
 	}
 	if name != "GOOGLE - Google LLC, US" {
 		t.Errorf("expected 'GOOGLE - Google LLC, US', got %q", name)
+	}
+}
+
+func TestASNLookup_ParseRIPEResponse_ExtractsASNFromRouteObject(t *testing.T) {
+	lookup := NewASNLookup()
+
+	// Simulated RIPE REST DB JSON response with a route object
+	response := `{
+		"objects": {
+			"object": [
+				{
+					"type": "route",
+					"attributes": {
+						"attribute": [
+							{"name": "route", "value": "80.10.248.0/21"},
+							{"name": "descr", "value": "France Telecom"},
+							{"name": "origin", "value": "AS3215"},
+							{"name": "mnt-by", "value": "FT-BRX"},
+							{"name": "source", "value": "RIPE"}
+						]
+					}
+				}
+			]
+		}
+	}`
+
+	result, err := lookup.parseRIPEResponse([]byte(response))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ASN != 3215 {
+		t.Errorf("expected ASN 3215, got %d", result.ASN)
+	}
+	if result.Prefix != "80.10.248.0/21" {
+		t.Errorf("expected prefix '80.10.248.0/21', got %q", result.Prefix)
+	}
+	if result.Name != "France Telecom" {
+		t.Errorf("expected name 'France Telecom', got %q", result.Name)
+	}
+}
+
+func TestASNLookup_ParseRIPEResponse_NoRouteObject(t *testing.T) {
+	lookup := NewASNLookup()
+
+	// Response with only inetnum, no route object
+	response := `{
+		"objects": {
+			"object": [
+				{
+					"type": "inetnum",
+					"attributes": {
+						"attribute": [
+							{"name": "inetnum", "value": "193.253.80.0 - 193.253.95.255"},
+							{"name": "netname", "value": "RBCI"},
+							{"name": "descr", "value": "France Telecom IP backbone"}
+						]
+					}
+				}
+			]
+		}
+	}`
+
+	_, err := lookup.parseRIPEResponse([]byte(response))
+
+	if err == nil {
+		t.Error("expected error when no route object present")
+	}
+}
+
+func TestASNLookup_ParseRIPEResponse_MultipleObjectsPicksRoute(t *testing.T) {
+	lookup := NewASNLookup()
+
+	// Response with both inetnum and route objects
+	response := `{
+		"objects": {
+			"object": [
+				{
+					"type": "inetnum",
+					"attributes": {
+						"attribute": [
+							{"name": "inetnum", "value": "80.10.252.0 - 80.10.255.255"},
+							{"name": "netname", "value": "IP2000-ADSL-BAS"}
+						]
+					}
+				},
+				{
+					"type": "route",
+					"attributes": {
+						"attribute": [
+							{"name": "route", "value": "80.10.248.0/21"},
+							{"name": "descr", "value": "France Telecom"},
+							{"name": "origin", "value": "AS3215"}
+						]
+					}
+				}
+			]
+		}
+	}`
+
+	result, err := lookup.parseRIPEResponse([]byte(response))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ASN != 3215 {
+		t.Errorf("expected ASN 3215, got %d", result.ASN)
+	}
+}
+
+func TestASNLookup_ParseRIPEResponse_EmptyObjects(t *testing.T) {
+	lookup := NewASNLookup()
+
+	response := `{"objects": {"object": []}}`
+
+	_, err := lookup.parseRIPEResponse([]byte(response))
+
+	if err == nil {
+		t.Error("expected error for empty objects")
+	}
+}
+
+func TestASNLookup_LookupRIPE_UsesHTTPServer(t *testing.T) {
+	// Start a test HTTP server that returns RIPE-like JSON
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify correct query parameters
+		query := r.URL.Query().Get("query-string")
+		if query != "80.10.255.25" {
+			t.Errorf("expected query-string '80.10.255.25', got %q", query)
+		}
+		typeFilter := r.URL.Query().Get("type-filter")
+		if typeFilter != "route" {
+			t.Errorf("expected type-filter 'route', got %q", typeFilter)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"objects": {
+				"object": [
+					{
+						"type": "route",
+						"attributes": {
+							"attribute": [
+								{"name": "route", "value": "80.10.248.0/21"},
+								{"name": "descr", "value": "France Telecom"},
+								{"name": "origin", "value": "AS3215"}
+							]
+						}
+					}
+				]
+			}
+		}`)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	lookup := NewASNLookup()
+	lookup.ripeBaseURL = server.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := lookup.lookupRIPE(ctx, net.ParseIP("80.10.255.25"))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ASN != 3215 {
+		t.Errorf("expected ASN 3215, got %d", result.ASN)
+	}
+	if result.Name != "France Telecom" {
+		t.Errorf("expected name 'France Telecom', got %q", result.Name)
+	}
+}
+
+func TestASNLookup_LookupRIPE_ReturnsErrorOnNoRoute(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"objects": {
+				"object": [
+					{
+						"type": "inetnum",
+						"attributes": {
+							"attribute": [
+								{"name": "inetnum", "value": "193.253.80.0 - 193.253.95.255"},
+								{"name": "netname", "value": "RBCI"}
+							]
+						}
+					}
+				]
+			}
+		}`)
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	lookup := NewASNLookup()
+	lookup.ripeBaseURL = server.URL
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := lookup.lookupRIPE(ctx, net.ParseIP("193.253.83.98"))
+
+	if err == nil {
+		t.Error("expected error when RIPE returns no route object")
 	}
 }
 

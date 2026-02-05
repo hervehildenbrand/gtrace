@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -25,13 +26,17 @@ type ASNResult struct {
 
 // ASNLookup performs ASN lookups via Team Cymru DNS.
 type ASNLookup struct {
-	resolver *net.Resolver
+	resolver    *net.Resolver
+	ripeBaseURL string // Base URL for RIPE REST DB (overridable for testing)
 }
+
+const defaultRIPEBaseURL = "https://rest.db.ripe.net"
 
 // NewASNLookup creates a new ASN lookup instance.
 func NewASNLookup() *ASNLookup {
 	return &ASNLookup{
-		resolver: net.DefaultResolver,
+		resolver:    net.DefaultResolver,
+		ripeBaseURL: defaultRIPEBaseURL,
 	}
 }
 
@@ -55,7 +60,13 @@ func (l *ASNLookup) Lookup(ctx context.Context, ip net.IP) (*ASNResult, error) {
 	}
 
 	// Fallback to ip-api.com for better coverage (supports IPv6)
-	return l.lookupIPAPI(ctx, ip)
+	result, err = l.lookupIPAPI(ctx, ip)
+	if err == nil && result.ASN > 0 {
+		return result, nil
+	}
+
+	// Second fallback: RIPE REST DB for IPs not in BGP tables
+	return l.lookupRIPE(ctx, ip)
 }
 
 // lookupCymru performs ASN lookup via Team Cymru DNS.
@@ -277,4 +288,91 @@ func (l *ASNLookup) parseASNName(response string) (string, error) {
 	}
 
 	return strings.TrimSpace(parts[4]), nil
+}
+
+// ripeDBResponse represents the RIPE REST Database JSON response.
+type ripeDBResponse struct {
+	Objects struct {
+		Object []struct {
+			Type       string `json:"type"`
+			Attributes struct {
+				Attribute []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+				} `json:"attribute"`
+			} `json:"attributes"`
+		} `json:"object"`
+	} `json:"objects"`
+}
+
+// lookupRIPE performs ASN lookup via the RIPE REST Database.
+// Searches for route objects that contain the origin ASN.
+func (l *ASNLookup) lookupRIPE(ctx context.Context, ip net.IP) (*ASNResult, error) {
+	url := fmt.Sprintf("%s/search.json?query-string=%s&type-filter=route&flags=no-referenced&flags=no-irt",
+		l.ripeBaseURL, ip.String())
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return l.parseRIPEResponse(body)
+}
+
+// parseRIPEResponse parses the RIPE REST DB JSON response and extracts ASN from route objects.
+func (l *ASNLookup) parseRIPEResponse(data []byte) (*ASNResult, error) {
+	var resp ripeDBResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse RIPE response: %w", err)
+	}
+
+	// Find the first route object with an origin attribute
+	for _, obj := range resp.Objects.Object {
+		if obj.Type != "route" {
+			continue
+		}
+
+		var asn uint32
+		var prefix, descr string
+
+		for _, attr := range obj.Attributes.Attribute {
+			switch attr.Name {
+			case "origin":
+				asnStr := strings.TrimPrefix(attr.Value, "AS")
+				asnNum, err := strconv.ParseUint(asnStr, 10, 32)
+				if err == nil {
+					asn = uint32(asnNum)
+				}
+			case "route":
+				prefix = attr.Value
+			case "descr":
+				if descr == "" {
+					descr = attr.Value
+				}
+			}
+		}
+
+		if asn > 0 {
+			return &ASNResult{
+				ASN:    asn,
+				Prefix: prefix,
+				Name:   descr,
+			}, nil
+		}
+	}
+
+	return nil, errors.New("no route object with origin ASN in RIPE response")
 }
