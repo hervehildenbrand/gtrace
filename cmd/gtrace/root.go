@@ -166,6 +166,15 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	return cmd
 }
 
+// newGlobalPingClient creates a GlobalPing client with retry notification.
+func newGlobalPingClient(w io.Writer, apiKey string) *globalping.Client {
+	client := globalping.NewClient(apiKey)
+	client.SetRetryCallback(func(attempt int, delay time.Duration) {
+		fmt.Fprintf(w, "Rate limited by GlobalPing API. Retrying in %v (attempt %d/3)...\n", delay, attempt)
+	})
+	return client
+}
+
 // runTrace executes the traceroute based on configuration.
 func runTrace(cmd *cobra.Command, cfg *Config) error {
 	// Set up context with cancellation
@@ -458,8 +467,8 @@ func runGlobalPingTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*
 
 // runGlobalPingTraceroute runs a simple traceroute via GlobalPing API.
 func runGlobalPingTraceroute(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.TraceResult, error) {
-	// Create client
-	client := globalping.NewClient(cfg.APIKey)
+	// Create client with retry notification
+	client := newGlobalPingClient(cmd.OutOrStdout(), cfg.APIKey)
 
 	// Parse locations
 	locations := globalping.ParseLocationStrings(cfg.From)
@@ -522,8 +531,8 @@ func runGlobalPingTraceroute(ctx context.Context, cmd *cobra.Command, cfg *Confi
 
 // runGlobalPingMTR runs an MTR measurement via GlobalPing API.
 func runGlobalPingMTR(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.TraceResult, error) {
-	// Create client
-	client := globalping.NewClient(cfg.APIKey)
+	// Create client with retry notification
+	client := newGlobalPingClient(cmd.OutOrStdout(), cfg.APIKey)
 
 	// Parse locations
 	locations := globalping.ParseLocationStrings(cfg.From)
@@ -660,7 +669,7 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 
 	go func() {
 		defer wg.Done()
-		remoteResult, remoteErr = runGlobalPingTraceForCompare(ctx, cfg)
+		remoteResult, remoteErr = runGlobalPingTraceForCompare(ctx, cmd.OutOrStdout(), cfg)
 	}()
 
 	wg.Wait()
@@ -747,9 +756,9 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 }
 
 // runGlobalPingTraceForCompare runs a GlobalPing trace for compare mode (returns result only).
-func runGlobalPingTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult, error) {
-	// Create client
-	client := globalping.NewClient(cfg.APIKey)
+func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config) (*hop.TraceResult, error) {
+	// Create client with retry notification
+	client := newGlobalPingClient(w, cfg.APIKey)
 
 	// Parse locations
 	locations := globalping.ParseLocationStrings(cfg.From)

@@ -19,14 +19,26 @@ const (
 
 	// DefaultTimeout is the default HTTP client timeout.
 	DefaultTimeout = 30 * time.Second
+
+	// DefaultRetryDelay is the default delay between retries on rate limit.
+	DefaultRetryDelay = 5 * time.Second
+
+	// DefaultMaxRetries is the default number of retries on rate limit.
+	DefaultMaxRetries = 3
 )
+
+// RetryCallback is called when a retry is about to happen.
+type RetryCallback func(attempt int, delay time.Duration)
 
 // Client is a GlobalPing API client.
 type Client struct {
-	baseURL      string
-	apiKey       string
-	httpClient   *http.Client
-	pollInterval time.Duration
+	baseURL       string
+	apiKey        string
+	httpClient    *http.Client
+	pollInterval  time.Duration
+	retryDelay    time.Duration
+	maxRetries    int
+	retryCallback RetryCallback
 }
 
 // NewClient creates a new GlobalPing API client.
@@ -38,7 +50,14 @@ func NewClient(apiKey string) *Client {
 			Timeout: DefaultTimeout,
 		},
 		pollInterval: DefaultPollInterval,
+		retryDelay:   DefaultRetryDelay,
+		maxRetries:   DefaultMaxRetries,
 	}
+}
+
+// SetRetryCallback sets a callback to be called when retrying after rate limit.
+func (c *Client) SetRetryCallback(cb RetryCallback) {
+	c.retryCallback = cb
 }
 
 // CreateMeasurement creates a new measurement.
@@ -79,7 +98,47 @@ func (c *Client) CreateMeasurement(ctx context.Context, req *MeasurementRequest)
 }
 
 // GetMeasurement retrieves the current state of a measurement.
+// Retries on rate limit (429) errors.
 func (c *Client) GetMeasurement(ctx context.Context, id string) (*MeasurementResult, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		result, err := c.getMeasurementOnce(ctx, id)
+		if err == nil {
+			return result, nil
+		}
+
+		// Check if it's a rate limit error
+		if !isRateLimitError(err) {
+			return nil, err
+		}
+
+		lastErr = err
+
+		// Don't retry if we've exhausted retries
+		if attempt >= c.maxRetries {
+			break
+		}
+
+		// Notify callback about retry
+		if c.retryCallback != nil {
+			c.retryCallback(attempt+1, c.retryDelay)
+		}
+
+		// Wait before retry
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(c.retryDelay):
+			// Continue to retry
+		}
+	}
+
+	return nil, lastErr
+}
+
+// getMeasurementOnce performs a single measurement retrieval.
+func (c *Client) getMeasurementOnce(ctx context.Context, id string) (*MeasurementResult, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v1/measurements/"+id, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -95,7 +154,7 @@ func (c *Client) GetMeasurement(ctx context.Context, id string) (*MeasurementRes
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var result MeasurementResult
@@ -104,6 +163,24 @@ func (c *Client) GetMeasurement(ctx context.Context, id string) (*MeasurementRes
 	}
 
 	return &result, nil
+}
+
+// APIError represents an API error response.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error (status %d): %s", e.StatusCode, e.Body)
+}
+
+// isRateLimitError checks if an error is a rate limit (429) error.
+func isRateLimitError(err error) bool {
+	if apiErr, ok := err.(*APIError); ok {
+		return apiErr.StatusCode == http.StatusTooManyRequests
+	}
+	return false
 }
 
 // WaitForMeasurement polls until the measurement is complete.
@@ -151,7 +228,47 @@ func (c *Client) setHeaders(req *http.Request) {
 }
 
 // GetMTRMeasurement retrieves the current state of an MTR measurement.
+// Retries on rate limit (429) errors.
 func (c *Client) GetMTRMeasurement(ctx context.Context, id string) (*MTRMeasurementResult, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		result, err := c.getMTRMeasurementOnce(ctx, id)
+		if err == nil {
+			return result, nil
+		}
+
+		// Check if it's a rate limit error
+		if !isRateLimitError(err) {
+			return nil, err
+		}
+
+		lastErr = err
+
+		// Don't retry if we've exhausted retries
+		if attempt >= c.maxRetries {
+			break
+		}
+
+		// Notify callback about retry
+		if c.retryCallback != nil {
+			c.retryCallback(attempt+1, c.retryDelay)
+		}
+
+		// Wait before retry
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(c.retryDelay):
+			// Continue to retry
+		}
+	}
+
+	return nil, lastErr
+}
+
+// getMTRMeasurementOnce performs a single MTR measurement retrieval.
+func (c *Client) getMTRMeasurementOnce(ctx context.Context, id string) (*MTRMeasurementResult, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v1/measurements/"+id, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -167,7 +284,7 @@ func (c *Client) GetMTRMeasurement(ctx context.Context, id string) (*MTRMeasurem
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var result MTRMeasurementResult

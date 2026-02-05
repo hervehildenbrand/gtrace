@@ -312,3 +312,66 @@ func TestClient_WaitForMTRMeasurement_PollsUntilComplete(t *testing.T) {
 		t.Errorf("expected at least 2 calls, got %d", calls)
 	}
 }
+
+func TestClient_GetMeasurement_RetriesOn429(t *testing.T) {
+	calls := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls < 3 {
+			// Return 429 for first two calls
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"type":"too_many_requests","message":"Too many requests"}}`))
+			return
+		}
+		// Third call succeeds
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(MeasurementResult{
+			ID:     "test-id",
+			Status: StatusFinished,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+	client.retryDelay = 10 * time.Millisecond // Fast retry for tests
+
+	result, err := client.GetMeasurement(context.Background(), "test-id")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ID != "test-id" {
+		t.Errorf("expected ID 'test-id', got %q", result.ID)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls (2 retries + 1 success), got %d", calls)
+	}
+}
+
+func TestClient_GetMeasurement_FailsAfterMaxRetries(t *testing.T) {
+	calls := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		// Always return 429
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"type":"too_many_requests","message":"Too many requests"}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+	client.retryDelay = 10 * time.Millisecond
+	client.maxRetries = 3
+
+	_, err := client.GetMeasurement(context.Background(), "test-id")
+
+	if err == nil {
+		t.Fatal("expected error after max retries")
+	}
+	if calls != 4 {
+		t.Errorf("expected 4 calls (1 initial + 3 retries), got %d", calls)
+	}
+}
