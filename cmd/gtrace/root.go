@@ -49,12 +49,25 @@ type Config struct {
 	DryRun   bool
 	DownloadDB bool
 	DBStatus   bool
+	IPv4Only bool // Force IPv4 only
+	IPv6Only bool // Force IPv6 only
 }
 
 var validProtocols = map[string]bool{
 	"icmp": true,
 	"udp":  true,
 	"tcp":  true,
+}
+
+// getAddressFamily returns the AddressFamily based on config flags.
+func getAddressFamily(cfg *Config) trace.AddressFamily {
+	if cfg.IPv4Only {
+		return trace.AddressFamilyIPv4
+	}
+	if cfg.IPv6Only {
+		return trace.AddressFamilyIPv6
+	}
+	return trace.AddressFamilyAuto
 }
 
 // NewRootCmd creates and returns the root cobra command.
@@ -88,6 +101,12 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 			if cfg.Compare && cfg.From == "" {
 				return fmt.Errorf("--compare requires --from to specify remote location")
 			}
+
+			// -4 and -6 are mutually exclusive
+			if cfg.IPv4Only && cfg.IPv6Only {
+				return fmt.Errorf("-4/--ipv4 and -6/--ipv6 are mutually exclusive")
+			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -162,6 +181,10 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	// Database management flags
 	cmd.Flags().BoolVar(&cfg.DownloadDB, "download-db", false, "Show instructions to download GeoIP databases")
 	cmd.Flags().BoolVar(&cfg.DBStatus, "db-status", false, "Show GeoIP database status")
+
+	// IP version flags
+	cmd.Flags().BoolVarP(&cfg.IPv4Only, "ipv4", "4", false, "Use IPv4 only")
+	cmd.Flags().BoolVarP(&cfg.IPv6Only, "ipv6", "6", false, "Use IPv6 only")
 
 	return cmd
 }
@@ -243,7 +266,7 @@ func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.T
 	}
 
 	// Resolve target
-	targetIP, err := trace.ResolveTarget(cfg.Target)
+	targetIP, err := trace.ResolveTarget(cfg.Target, getAddressFamily(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve target: %w", err)
 	}
@@ -715,7 +738,7 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 	}
 
 	// Resolve target
-	targetIP, err := trace.ResolveTarget(cfg.Target)
+	targetIP, err := trace.ResolveTarget(cfg.Target, getAddressFamily(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve target: %w", err)
 	}
@@ -834,7 +857,7 @@ func runMonitor(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
 	}
 
 	// Resolve target
-	targetIP, err := trace.ResolveTarget(cfg.Target)
+	targetIP, err := trace.ResolveTarget(cfg.Target, getAddressFamily(cfg))
 	if err != nil {
 		return fmt.Errorf("failed to resolve target: %w", err)
 	}

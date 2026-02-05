@@ -440,3 +440,76 @@ func TestRootCommand_CompareRequiresFrom(t *testing.T) {
 		t.Errorf("error should mention --from, got: %v", err)
 	}
 }
+
+func TestRootCommand_ParsesIPv4Flag(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "-4", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	ipv4, _ := cmd.Flags().GetBool("ipv4")
+	if !ipv4 {
+		t.Error("expected ipv4 to be true")
+	}
+}
+
+func TestRootCommand_ParsesIPv6Flag(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "-6", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	ipv6, _ := cmd.Flags().GetBool("ipv6")
+	if !ipv6 {
+		t.Error("expected ipv6 to be true")
+	}
+}
+
+func TestRootCommand_IPv4AndIPv6AreMutuallyExclusive(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "-4", "-6", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error when both -4 and -6 are specified")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error should mention mutual exclusivity, got: %v", err)
+	}
+}
+
+func TestRootCommand_IPv4DefaultsFalse(t *testing.T) {
+	cmd := NewRootCmd()
+
+	ipv4, _ := cmd.Flags().GetBool("ipv4")
+	if ipv4 {
+		t.Error("expected ipv4 to be false by default")
+	}
+}
+
+func TestRootCommand_IPv6DefaultsFalse(t *testing.T) {
+	cmd := NewRootCmd()
+
+	ipv6, _ := cmd.Flags().GetBool("ipv6")
+	if ipv6 {
+		t.Error("expected ipv6 to be false by default")
+	}
+}
