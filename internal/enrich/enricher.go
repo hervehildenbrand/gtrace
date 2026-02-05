@@ -8,6 +8,19 @@ import (
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
+// EnricherInterface defines the contract for IP enrichment.
+// This interface allows for dependency injection and easier testing.
+type EnricherInterface interface {
+	// EnrichIP performs all enrichment lookups for a single IP.
+	EnrichIP(ctx context.Context, ip net.IP) (*hop.Enrichment, error)
+
+	// EnrichHop enriches a hop with ASN, hostname, etc.
+	EnrichHop(ctx context.Context, h *hop.Hop)
+
+	// EnrichTrace enriches all hops in a trace result.
+	EnrichTrace(ctx context.Context, tr *hop.TraceResult)
+}
+
 // Enricher provides IP enrichment by combining ASN, GeoIP, IX, and rDNS lookups.
 type Enricher struct {
 	asn   *ASNLookup

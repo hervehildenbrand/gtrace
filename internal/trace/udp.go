@@ -99,16 +99,16 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 
 	// Create UDP socket with specific TTL/Hop Limit
 	domain := SocketDomain(target)
-	fd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
+	fd, err := createRawSocket(domain, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create UDP socket: %w", err)
 	}
-	defer syscall.Close(fd)
+	defer closeSocket(fd)
 
 	// Set TTL/Hop Limit
 	level := ProtocolLevel(target)
 	opt := TTLSocketOption(target)
-	if err := syscall.SetsockoptInt(fd, level, opt, ttl); err != nil {
+	if err := setSocketTTL(fd, level, opt, ttl); err != nil {
 		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
 	}
 
@@ -121,7 +121,7 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	start := time.Now()
 
 	// Send UDP packet
-	if err := syscall.Sendto(fd, payload, 0, sa); err != nil {
+	if err := sendToSocket(fd, payload, 0, sa); err != nil {
 		return nil, fmt.Errorf("failed to send UDP: %w", err)
 	}
 

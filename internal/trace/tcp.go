@@ -97,21 +97,21 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 
 	// Create TCP socket
 	domain := SocketDomain(target)
-	fd, err := syscall.Socket(domain, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	fd, err := createRawSocket(domain, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TCP socket: %w", err)
 	}
-	defer syscall.Close(fd)
+	defer closeSocket(fd)
 
 	// Set TTL/Hop Limit
 	level := ProtocolLevel(target)
 	opt := TTLSocketOption(target)
-	if err := syscall.SetsockoptInt(fd, level, opt, ttl); err != nil {
+	if err := setSocketTTL(fd, level, opt, ttl); err != nil {
 		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
 	}
 
 	// Set non-blocking
-	if err := syscall.SetNonblock(fd, true); err != nil {
+	if err := setSocketNonBlocking(fd); err != nil {
 		return nil, fmt.Errorf("failed to set non-blocking: %w", err)
 	}
 
@@ -121,11 +121,11 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	start := time.Now()
 
 	// Initiate TCP connection (will send SYN)
-	err = syscall.Connect(fd, sa)
-	// Connect will return EINPROGRESS for non-blocking socket
-	if err != nil && err != syscall.EINPROGRESS {
+	err = connectSocket(fd, sa)
+	// Connect will return EINPROGRESS (Unix) or WSAEWOULDBLOCK (Windows) for non-blocking socket
+	if err != nil && !isErrInProgress(err) {
 		// Check if we got a connection refused (RST) - means target reached
-		if err == syscall.ECONNREFUSED {
+		if isErrConnRefused(err) {
 			return &probeResult{IP: target, RTT: time.Since(start)}, nil
 		}
 	}
@@ -211,21 +211,21 @@ func (t *TCPTracer) getTCPID() int {
 }
 
 // checkTCPConnection checks if the TCP connection has completed.
-func (t *TCPTracer) checkTCPConnection(fd int) bool {
+func (t *TCPTracer) checkTCPConnection(fd socketFD) bool {
 	// Use select with zero timeout to check if socket is writable
 	// A non-blocking socket becomes writable when connection completes (or fails)
-	ready, err := selectWrite(fd)
+	ready, err := selectWrite(socketFDInt(fd))
 	if err != nil || !ready {
 		return false
 	}
 
 	// Socket is writable - check SO_ERROR to see if connection succeeded or failed
-	val, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_ERROR)
+	val, err := getSocketError(fd)
 	if err != nil {
 		return false
 	}
 	// val == 0 means connected, ECONNREFUSED means RST received (target reached)
-	return val == 0 || val == int(syscall.ECONNREFUSED)
+	return val == 0 || val == int(errConnRefused)
 }
 
 // isOurProbe checks if the ICMP response contains our original TCP packet (IPv4 only, for backward compatibility).

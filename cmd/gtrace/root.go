@@ -81,6 +81,15 @@ func getIPVersion(cfg *Config) int {
 	return 0 // Auto - let GlobalPing decide
 }
 
+// newEnricher creates an enricher based on configuration.
+// Returns nil if offline mode is enabled (no enrichment).
+func newEnricher(offline bool) enrich.EnricherInterface {
+	if offline {
+		return nil
+	}
+	return enrich.NewEnricher()
+}
+
 // NewRootCmd creates and returns the root cobra command.
 func NewRootCmd() *cobra.Command {
 	var cfg Config
@@ -116,6 +125,15 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 			// -4 and -6 are mutually exclusive
 			if cfg.IPv4Only && cfg.IPv6Only {
 				return fmt.Errorf("-4/--ipv4 and -6/--ipv6 are mutually exclusive")
+			}
+
+			// Check privileges early for local traces
+			// Skip for: --from only (GlobalPing API), --dry-run, --compare (checked at runtime)
+			needsLocalTrace := cfg.From == "" || cfg.Compare
+			if needsLocalTrace && !cfg.DryRun {
+				if err := trace.CheckPrivileges(); err != nil {
+					return err
+				}
 			}
 
 			return nil
@@ -283,10 +301,7 @@ func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.T
 	}
 
 	// Create enricher (unless offline mode)
-	var enricher *enrich.Enricher
-	if !cfg.Offline {
-		enricher = enrich.NewEnricher()
-	}
+	enricher := newEnricher(cfg.Offline)
 
 	// Use single-shot mode for --simple or when exporting
 	if cfg.Simple || cfg.Output != "" {
@@ -313,7 +328,7 @@ func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.T
 }
 
 // runLocalTraceMTR runs a continuous MTR-style trace with the TUI.
-func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enricher *enrich.Enricher, targetIP net.IP, timeout time.Duration) (*hop.TraceResult, error) {
+func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enricher enrich.EnricherInterface, targetIP net.IP, timeout time.Duration) (*hop.TraceResult, error) {
 	// Parse interval
 	interval, err := time.ParseDuration(cfg.Interval)
 	if err != nil {
@@ -412,7 +427,7 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 }
 
 // runLocalTraceWithTUI runs a trace with the interactive TUI display (legacy single-shot).
-func runLocalTraceWithTUI(ctx context.Context, cmd *cobra.Command, cfg *Config, tracer trace.Tracer, enricher *enrich.Enricher, targetIP net.IP) (*hop.TraceResult, error) {
+func runLocalTraceWithTUI(ctx context.Context, cmd *cobra.Command, cfg *Config, tracer trace.Tracer, enricher enrich.EnricherInterface, targetIP net.IP) (*hop.TraceResult, error) {
 	hopChan := make(chan *hop.Hop, 100)
 	doneChan := make(chan bool, 1)
 
@@ -454,7 +469,7 @@ func runLocalTraceWithTUI(ctx context.Context, cmd *cobra.Command, cfg *Config, 
 }
 
 // runLocalTraceSimple runs a trace with simple text output.
-func runLocalTraceSimple(ctx context.Context, cmd *cobra.Command, cfg *Config, tracer trace.Tracer, enricher *enrich.Enricher, targetIP net.IP) (*hop.TraceResult, error) {
+func runLocalTraceSimple(ctx context.Context, cmd *cobra.Command, cfg *Config, tracer trace.Tracer, enricher enrich.EnricherInterface, targetIP net.IP) (*hop.TraceResult, error) {
 	// Create renderer
 	renderer := display.NewSimpleRenderer()
 
@@ -772,10 +787,7 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 	}
 
 	// Create enricher (unless offline mode)
-	var enricher *enrich.Enricher
-	if !cfg.Offline {
-		enricher = enrich.NewEnricher()
-	}
+	enricher := newEnricher(cfg.Offline)
 
 	// Run trace silently (no output during trace)
 	result, err := tracer.Trace(ctx, targetIP, func(h *hop.Hop) {
@@ -892,10 +904,7 @@ func runMonitor(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
 	}
 
 	// Create enricher (unless offline mode)
-	var enricher *enrich.Enricher
-	if !cfg.Offline {
-		enricher = enrich.NewEnricher()
-	}
+	enricher := newEnricher(cfg.Offline)
 
 	// Create monitor config
 	monCfg := monitor.DefaultConfig()
