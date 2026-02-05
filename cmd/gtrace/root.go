@@ -122,6 +122,14 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 				return fmt.Errorf("--compare requires --from to specify remote location")
 			}
 
+			// Validate --from location count
+			if cfg.From != "" {
+				locations := globalping.ParseLocationStrings(cfg.From)
+				if len(locations) > globalping.MaxLocations {
+					return fmt.Errorf("too many --from locations: %d (maximum %d)", len(locations), globalping.MaxLocations)
+				}
+			}
+
 			// -4 and -6 are mutually exclusive
 			if cfg.IPv4Only && cfg.IPv6Only {
 				return fmt.Errorf("-4/--ipv4 and -6/--ipv6 are mutually exclusive")
@@ -173,7 +181,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	}
 
 	// Source location flags
-	cmd.Flags().StringVar(&cfg.From, "from", "", "Run from GlobalPing location(s)")
+	cmd.Flags().StringVar(&cfg.From, "from", "", "Run from GlobalPing location(s), comma-separated (max 5)")
 	cmd.Flags().BoolVar(&cfg.Compare, "compare", false, "Compare local + remote traces")
 	cmd.Flags().StringVar(&cfg.View, "view", "side", "Display mode: side|tabs|unified")
 

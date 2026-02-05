@@ -3,12 +3,16 @@ package globalping
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"time"
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
+
+// MaxLocations is the maximum number of GlobalPing probe locations per request.
+const MaxLocations = 5
 
 // MeasurementType represents the type of measurement.
 type MeasurementType string
@@ -93,6 +97,9 @@ func (r *MeasurementRequest) Validate() error {
 	}
 	if len(r.Locations) == 0 {
 		return errors.New("at least one location is required")
+	}
+	if len(r.Locations) > MaxLocations {
+		return fmt.Errorf("too many locations: %d (maximum %d)", len(r.Locations), MaxLocations)
 	}
 	return nil
 }

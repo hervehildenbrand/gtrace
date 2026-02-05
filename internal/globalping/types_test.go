@@ -1,6 +1,7 @@
 package globalping
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -252,6 +253,44 @@ func TestMTRStats_LossPercent(t *testing.T) {
 	// Loss is already provided as percentage by GlobalPing API
 	if stats.Loss != 10.0 {
 		t.Errorf("expected Loss 10.0%%, got %.1f%%", stats.Loss)
+	}
+}
+
+func TestMeasurementRequest_ValidateRejectsTooManyLocations(t *testing.T) {
+	locations := make([]Location, 6)
+	for i := range locations {
+		locations[i] = Location{Magic: "city" + string(rune('A'+i))}
+	}
+
+	req := &MeasurementRequest{
+		Type:      "traceroute",
+		Target:    "google.com",
+		Locations: locations,
+	}
+
+	err := req.Validate()
+	if err == nil {
+		t.Fatal("expected error for 6 locations")
+	}
+	if !strings.Contains(err.Error(), "maximum") {
+		t.Errorf("error should mention 'maximum', got: %v", err)
+	}
+}
+
+func TestMeasurementRequest_ValidateAcceptsMaxLocations(t *testing.T) {
+	locations := make([]Location, 5)
+	for i := range locations {
+		locations[i] = Location{Magic: "city" + string(rune('A'+i))}
+	}
+
+	req := &MeasurementRequest{
+		Type:      "traceroute",
+		Target:    "google.com",
+		Locations: locations,
+	}
+
+	if err := req.Validate(); err != nil {
+		t.Errorf("unexpected error for 5 locations: %v", err)
 	}
 }
 

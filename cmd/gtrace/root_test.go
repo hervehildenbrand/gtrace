@@ -537,6 +537,37 @@ func TestGetIPVersion_IPv6Only(t *testing.T) {
 	}
 }
 
+func TestRootCommand_FromRejectsTooManyLocations(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "--from", "a,b,c,d,e,f", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error for 6 --from locations")
+	}
+	if !strings.Contains(err.Error(), "maximum") {
+		t.Errorf("error should mention 'maximum', got: %v", err)
+	}
+}
+
+func TestRootCommand_FromAcceptsFiveLocations(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "--from", "Paris,London,Tokyo,NYC,Berlin", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error for 5 --from locations: %v", err)
+	}
+}
+
 func TestDisplayMTRHop_ShowsASN(t *testing.T) {
 	buf := new(bytes.Buffer)
 	mh := &globalping.MTRHop{
