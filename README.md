@@ -1,8 +1,11 @@
 # gtrace
 
+[![CI](https://github.com/hervehildenbrand/gtrace/actions/workflows/ci.yml/badge.svg)](https://github.com/hervehildenbrand/gtrace/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hervehildenbrand/gtrace)](https://goreportcard.com/report/github.com/hervehildenbrand/gtrace)
+[![Release](https://img.shields.io/github/v/release/hervehildenbrand/gtrace?include_prereleases)](https://github.com/hervehildenbrand/gtrace/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](https://github.com/hervehildenbrand/gtrace/releases)
 
 Advanced network path analysis tool combining local traceroute with GlobalPing's distributed probe network.
 
