@@ -756,6 +756,7 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 }
 
 // runGlobalPingTraceForCompare runs a GlobalPing trace for compare mode (returns result only).
+// Uses MTR instead of traceroute to get ASN data for richer output.
 func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config) (*hop.TraceResult, error) {
 	// Create client with retry notification
 	client := newGlobalPingClient(w, cfg.APIKey)
@@ -763,9 +764,9 @@ func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config)
 	// Parse locations
 	locations := globalping.ParseLocationStrings(cfg.From)
 
-	// Create measurement request
+	// Use MTR to get ASN data (traceroute doesn't include ASN)
 	req := &globalping.MeasurementRequest{
-		Type:      globalping.MeasurementTypeTraceroute,
+		Type:      globalping.MeasurementTypeMTR,
 		Target:    cfg.Target,
 		Locations: locations,
 		Options: globalping.MeasurementOptions{
@@ -780,8 +781,8 @@ func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config)
 		return nil, fmt.Errorf("failed to create measurement: %w", err)
 	}
 
-	// Wait for completion
-	measurement, err := client.WaitForMeasurement(ctx, resp.ID)
+	// Wait for MTR completion (takes longer than traceroute)
+	measurement, err := client.WaitForMTRMeasurement(ctx, resp.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get results: %w", err)
 	}
