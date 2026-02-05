@@ -10,7 +10,6 @@ import (
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 )
 
 // TCPTracer implements traceroute using TCP SYN probes.
@@ -28,13 +27,16 @@ func NewTCPTracer(cfg *Config) *TCPTracer {
 }
 
 // Trace performs a TCP traceroute to the target IP.
+// Supports both IPv4 and IPv6 targets.
 func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallback) (*hop.TraceResult, error) {
 	result := hop.NewTraceResult(target.String(), target.String())
 	result.Protocol = string(ProtocolTCP)
 	result.StartTime = time.Now()
 
-	// Open raw socket for receiving ICMP responses
-	icmpConn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	// Open raw socket for receiving ICMP responses based on IP version
+	proto := ICMPProtocol(target)
+	listenAddr := ListenAddress(target)
+	icmpConn, err := icmp.ListenPacket(proto, listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open ICMP socket: %w (try running with sudo)", err)
 	}
@@ -89,19 +91,23 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 }
 
 // sendProbe sends a single TCP SYN probe and waits for response.
+// Supports both IPv4 and IPv6 targets.
 func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
 	port := t.getPort()
 
 	// Create TCP socket
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	domain := SocketDomain(target)
+	fd, err := syscall.Socket(domain, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TCP socket: %w", err)
 	}
 	defer syscall.Close(fd)
 
-	// Set TTL
-	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_TTL, ttl); err != nil {
-		return nil, fmt.Errorf("failed to set TTL: %w", err)
+	// Set TTL/Hop Limit
+	level := ProtocolLevel(target)
+	opt := TTLSocketOption(target)
+	if err := syscall.SetsockoptInt(fd, level, opt, ttl); err != nil {
+		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
 	}
 
 	// Set non-blocking
@@ -110,12 +116,7 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	}
 
 	// Build destination address
-	var addr [4]byte
-	copy(addr[:], target.To4())
-	sa := &syscall.SockaddrInet4{
-		Port: port,
-		Addr: addr,
-	}
+	sa := buildSockaddr(target, port)
 
 	start := time.Now()
 
@@ -134,6 +135,9 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	if err := icmpConn.SetReadDeadline(deadline); err != nil {
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
+
+	// Protocol number for parsing ICMP messages
+	protoNum := ICMPProtocolNum(target)
 
 	// Wait for ICMP response or TCP connection
 	reply := make([]byte, 1500)
@@ -159,18 +163,17 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		rtt := end.Sub(start)
 
 		// Parse the ICMP response
-		rm, err := icmp.ParseMessage(1, reply[:n])
+		rm, err := icmp.ParseMessage(protoNum, reply[:n])
 		if err != nil {
 			continue
 		}
 
 		peerIP := peer.(*net.IPAddr).IP
 
-		switch rm.Type {
-		case ipv4.ICMPTypeTimeExceeded:
-			// Intermediate hop
+		// Check for Time Exceeded (intermediate hop)
+		if isTimeExceeded(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.TimeExceeded); ok {
-				if t.isOurProbe(body.Data, port) {
+				if t.isOurProbeForIP(body.Data, port, target) {
 					// Extract MPLS labels from the raw ICMP data
 					var mplsLabels []hop.MPLSLabel
 					if n > 8 {
@@ -179,11 +182,12 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels}, nil
 				}
 			}
+		}
 
-		case ipv4.ICMPTypeDestinationUnreachable:
-			// Target reached but filtered
+		// Check for Destination Unreachable (target reached but filtered)
+		if isDestUnreachable(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
-				if t.isOurProbe(body.Data, port) {
+				if t.isOurProbeForIP(body.Data, port, target) {
 					return &probeResult{IP: peerIP, RTT: rtt}, nil
 				}
 			}
@@ -236,7 +240,7 @@ func (t *TCPTracer) checkTCPConnection(fd int) bool {
 	return val == 0 || val == int(syscall.ECONNREFUSED)
 }
 
-// isOurProbe checks if the ICMP response contains our original TCP packet.
+// isOurProbe checks if the ICMP response contains our original TCP packet (IPv4 only, for backward compatibility).
 func (t *TCPTracer) isOurProbe(data []byte, expectedPort int) bool {
 	// Data contains original IP header (20 bytes) + TCP header
 	if len(data) < 24 {
@@ -246,5 +250,21 @@ func (t *TCPTracer) isOurProbe(data []byte, expectedPort int) bool {
 	// Extract destination port from TCP header (offset 22-23 in the returned data)
 	// IP header is 20 bytes, TCP dest port is at offset 2 in TCP header
 	dstPort := int(data[22])<<8 | int(data[23])
+	return dstPort == expectedPort
+}
+
+// isOurProbeForIP checks if the ICMP response contains our original TCP packet.
+// Handles both IPv4 (20 byte header) and IPv6 (40 byte header).
+func (t *TCPTracer) isOurProbeForIP(data []byte, expectedPort int, target net.IP) bool {
+	ipHdrSize := IPHeaderSize(target)
+	minLen := ipHdrSize + 4 // Need IP header + at least 4 bytes of TCP header (for dest port)
+	if len(data) < minLen {
+		return false
+	}
+
+	// Extract destination port from TCP header
+	// TCP dest port is at offset 2 in TCP header
+	portOffset := ipHdrSize + 2
+	dstPort := int(data[portOffset])<<8 | int(data[portOffset+1])
 	return dstPort == expectedPort
 }
