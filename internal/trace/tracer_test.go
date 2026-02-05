@@ -61,7 +61,7 @@ func TestTracerConfig_Validate_RejectsNegativeTimeout(t *testing.T) {
 }
 
 func TestResolveTarget_ResolvesHostname(t *testing.T) {
-	ip, err := ResolveTarget("localhost")
+	ip, err := ResolveTarget("localhost", AddressFamilyAuto)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -73,7 +73,7 @@ func TestResolveTarget_ResolvesHostname(t *testing.T) {
 }
 
 func TestResolveTarget_AcceptsIPAddress(t *testing.T) {
-	ip, err := ResolveTarget("8.8.8.8")
+	ip, err := ResolveTarget("8.8.8.8", AddressFamilyAuto)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -84,10 +84,62 @@ func TestResolveTarget_AcceptsIPAddress(t *testing.T) {
 }
 
 func TestResolveTarget_RejectsInvalidHostname(t *testing.T) {
-	_, err := ResolveTarget("this.hostname.definitely.does.not.exist.invalid")
+	_, err := ResolveTarget("this.hostname.definitely.does.not.exist.invalid", AddressFamilyAuto)
 
 	if err == nil {
 		t.Error("expected error for invalid hostname")
+	}
+}
+
+func TestResolveTarget_IPv4Literal_WithIPv4Family(t *testing.T) {
+	ip, err := ResolveTarget("8.8.8.8", AddressFamilyIPv4)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ip.Equal(net.ParseIP("8.8.8.8")) {
+		t.Errorf("expected 8.8.8.8, got %v", ip)
+	}
+}
+
+func TestResolveTarget_IPv6Literal_WithIPv6Family(t *testing.T) {
+	ip, err := ResolveTarget("2001:4860:4860::8888", AddressFamilyIPv6)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := net.ParseIP("2001:4860:4860::8888")
+	if !ip.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, ip)
+	}
+}
+
+func TestResolveTarget_IPv4Literal_WithIPv6Family_Rejects(t *testing.T) {
+	_, err := ResolveTarget("8.8.8.8", AddressFamilyIPv6)
+
+	if err == nil {
+		t.Error("expected error when forcing IPv6 on IPv4 literal")
+	}
+}
+
+func TestResolveTarget_IPv6Literal_WithIPv4Family_Rejects(t *testing.T) {
+	_, err := ResolveTarget("2001:4860:4860::8888", AddressFamilyIPv4)
+
+	if err == nil {
+		t.Error("expected error when forcing IPv4 on IPv6 literal")
+	}
+}
+
+func TestAddressFamily_Constants(t *testing.T) {
+	// Verify constant values are distinct
+	if AddressFamilyAuto == AddressFamilyIPv4 {
+		t.Error("AddressFamilyAuto should not equal AddressFamilyIPv4")
+	}
+	if AddressFamilyAuto == AddressFamilyIPv6 {
+		t.Error("AddressFamilyAuto should not equal AddressFamilyIPv6")
+	}
+	if AddressFamilyIPv4 == AddressFamilyIPv6 {
+		t.Error("AddressFamilyIPv4 should not equal AddressFamilyIPv6")
 	}
 }
 

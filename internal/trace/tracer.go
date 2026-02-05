@@ -19,6 +19,18 @@ const (
 	ProtocolTCP  Protocol = "tcp"
 )
 
+// AddressFamily specifies the preferred IP version for target resolution.
+type AddressFamily int
+
+const (
+	// AddressFamilyAuto prefers IPv4 but accepts IPv6 if no IPv4 available.
+	AddressFamilyAuto AddressFamily = iota
+	// AddressFamilyIPv4 forces IPv4 only.
+	AddressFamilyIPv4
+	// AddressFamilyIPv6 forces IPv6 only.
+	AddressFamilyIPv6
+)
+
 // Config holds traceroute configuration.
 type Config struct {
 	Protocol      Protocol
@@ -76,10 +88,26 @@ type Tracer interface {
 }
 
 // ResolveTarget resolves a hostname or IP string to a net.IP.
-func ResolveTarget(target string) (net.IP, error) {
+// The af parameter controls IP version preference:
+//   - AddressFamilyAuto: Prefer IPv4, fall back to IPv6
+//   - AddressFamilyIPv4: Only return IPv4 addresses
+//   - AddressFamilyIPv6: Only return IPv6 addresses
+func ResolveTarget(target string, af AddressFamily) (net.IP, error) {
 	// First, try to parse as an IP address
 	ip := net.ParseIP(target)
 	if ip != nil {
+		// Validate IP matches requested address family
+		isV4 := ip.To4() != nil
+		switch af {
+		case AddressFamilyIPv4:
+			if !isV4 {
+				return nil, errors.New("IPv6 address provided but IPv4 required (-4 flag)")
+			}
+		case AddressFamilyIPv6:
+			if isV4 {
+				return nil, errors.New("IPv4 address provided but IPv6 required (-6 flag)")
+			}
+		}
 		return ip, nil
 	}
 
@@ -93,12 +121,35 @@ func ResolveTarget(target string) (net.IP, error) {
 		return nil, errors.New("no IP addresses found for hostname")
 	}
 
-	// Prefer IPv4
+	// Filter and select based on address family
+	var v4Addrs, v6Addrs []net.IP
 	for _, ip := range ips {
 		if ip.To4() != nil {
-			return ip, nil
+			v4Addrs = append(v4Addrs, ip)
+		} else {
+			v6Addrs = append(v6Addrs, ip)
 		}
 	}
 
-	return ips[0], nil
+	switch af {
+	case AddressFamilyIPv4:
+		if len(v4Addrs) == 0 {
+			return nil, errors.New("no IPv4 address found for hostname (try without -4 flag)")
+		}
+		return v4Addrs[0], nil
+	case AddressFamilyIPv6:
+		if len(v6Addrs) == 0 {
+			return nil, errors.New("no IPv6 address found for hostname (try without -6 flag)")
+		}
+		return v6Addrs[0], nil
+	default: // AddressFamilyAuto
+		// Prefer IPv4
+		if len(v4Addrs) > 0 {
+			return v4Addrs[0], nil
+		}
+		if len(v6Addrs) > 0 {
+			return v6Addrs[0], nil
+		}
+		return nil, errors.New("no IP addresses found for hostname")
+	}
 }
