@@ -10,7 +10,6 @@ import (
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/net/icmp"
-	"golang.org/x/net/ipv4"
 )
 
 // UDPTracer implements traceroute using UDP probes.
@@ -28,13 +27,16 @@ func NewUDPTracer(cfg *Config) *UDPTracer {
 }
 
 // Trace performs a UDP traceroute to the target IP.
+// Supports both IPv4 and IPv6 targets.
 func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallback) (*hop.TraceResult, error) {
 	result := hop.NewTraceResult(target.String(), target.String())
 	result.Protocol = string(ProtocolUDP)
 	result.StartTime = time.Now()
 
-	// Open raw socket for receiving ICMP responses
-	icmpConn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	// Open raw socket for receiving ICMP responses based on IP version
+	proto := ICMPProtocol(target)
+	listenAddr := ListenAddress(target)
+	icmpConn, err := icmp.ListenPacket(proto, listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open ICMP socket: %w (try running with sudo)", err)
 	}
@@ -91,28 +93,27 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 }
 
 // sendProbe sends a single UDP probe and waits for ICMP response.
+// Supports both IPv4 and IPv6 targets.
 func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
 	port := t.getPort(seq)
 
-	// Create UDP socket with specific TTL
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
+	// Create UDP socket with specific TTL/Hop Limit
+	domain := SocketDomain(target)
+	fd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create UDP socket: %w", err)
 	}
 	defer syscall.Close(fd)
 
-	// Set TTL
-	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_TTL, ttl); err != nil {
-		return nil, fmt.Errorf("failed to set TTL: %w", err)
+	// Set TTL/Hop Limit
+	level := ProtocolLevel(target)
+	opt := TTLSocketOption(target)
+	if err := syscall.SetsockoptInt(fd, level, opt, ttl); err != nil {
+		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
 	}
 
 	// Build destination address
-	var addr [4]byte
-	copy(addr[:], target.To4())
-	sa := &syscall.SockaddrInet4{
-		Port: port,
-		Addr: addr,
-	}
+	sa := buildSockaddr(target, port)
 
 	// Build payload
 	payload := t.buildPayload(ttl, seq)
@@ -130,6 +131,9 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
+	// Protocol number for parsing ICMP messages
+	protoNum := ICMPProtocolNum(target)
+
 	// Wait for ICMP response
 	reply := make([]byte, 1500)
 	for {
@@ -142,18 +146,17 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		rtt := end.Sub(start)
 
 		// Parse the ICMP response
-		rm, err := icmp.ParseMessage(1, reply[:n])
+		rm, err := icmp.ParseMessage(protoNum, reply[:n])
 		if err != nil {
 			continue
 		}
 
 		peerIP := peer.(*net.IPAddr).IP
 
-		switch rm.Type {
-		case ipv4.ICMPTypeTimeExceeded:
-			// Intermediate hop
+		// Check for Time Exceeded (intermediate hop)
+		if isTimeExceeded(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.TimeExceeded); ok {
-				if t.isOurProbe(body.Data, port) {
+				if t.isOurProbeForIP(body.Data, port, target) {
 					// Extract MPLS labels from the raw ICMP data
 					var mplsLabels []hop.MPLSLabel
 					if n > 8 {
@@ -162,11 +165,12 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels}, nil
 				}
 			}
+		}
 
-		case ipv4.ICMPTypeDestinationUnreachable:
-			// Target reached (port unreachable)
+		// Check for Destination Unreachable (target reached, port unreachable)
+		if isDestUnreachable(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
-				if t.isOurProbe(body.Data, port) {
+				if t.isOurProbeForIP(body.Data, port, target) {
 					return &probeResult{IP: peerIP, RTT: rtt}, nil
 				}
 			}
@@ -195,7 +199,7 @@ func (t *UDPTracer) getUDPID() int {
 	return t.id
 }
 
-// isOurProbe checks if the ICMP response contains our original UDP packet.
+// isOurProbe checks if the ICMP response contains our original UDP packet (IPv4 only, for backward compatibility).
 func (t *UDPTracer) isOurProbe(data []byte, expectedPort int) bool {
 	// Data contains original IP header (20 bytes) + UDP header (8 bytes)
 	if len(data) < 28 {
@@ -206,6 +210,40 @@ func (t *UDPTracer) isOurProbe(data []byte, expectedPort int) bool {
 	// IP header is 20 bytes, UDP dest port is at offset 2 in UDP header
 	dstPort := int(data[22])<<8 | int(data[23])
 	return dstPort == expectedPort
+}
+
+// isOurProbeForIP checks if the ICMP response contains our original UDP packet.
+// Handles both IPv4 (20 byte header) and IPv6 (40 byte header).
+func (t *UDPTracer) isOurProbeForIP(data []byte, expectedPort int, target net.IP) bool {
+	ipHdrSize := IPHeaderSize(target)
+	minLen := ipHdrSize + 4 // Need IP header + at least 4 bytes of UDP header (for dest port)
+	if len(data) < minLen {
+		return false
+	}
+
+	// Extract destination port from UDP header
+	// UDP dest port is at offset 2 in UDP header
+	portOffset := ipHdrSize + 2
+	dstPort := int(data[portOffset])<<8 | int(data[portOffset+1])
+	return dstPort == expectedPort
+}
+
+// buildSockaddr creates the appropriate sockaddr structure for the target IP.
+func buildSockaddr(target net.IP, port int) syscall.Sockaddr {
+	if IsIPv6(target) {
+		var addr [16]byte
+		copy(addr[:], target.To16())
+		return &syscall.SockaddrInet6{
+			Port: port,
+			Addr: addr,
+		}
+	}
+	var addr [4]byte
+	copy(addr[:], target.To4())
+	return &syscall.SockaddrInet4{
+		Port: port,
+		Addr: addr,
+	}
 }
 
 // timeoutError implements net.Error for timeout handling.
