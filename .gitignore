@@ -1,5 +1,6 @@
 # Binaries
 gtr
+gtrace
 *.exe
 
 # Test coverage
@@ -17,4 +18,14 @@ Thumbs.db
 
 # MaxMind databases
 *.mmdb
-gtrace
+
+# Private/local files
+specs/
+plans/
+notes/
+TODO.md
+NOTES.md
+*.local
+*.private
+.env
+.env.*
