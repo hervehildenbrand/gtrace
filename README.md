@@ -9,6 +9,8 @@
 
 Advanced network path analysis tool combining local traceroute with GlobalPing's distributed probe network.
 
+![gtrace demo](demo/gtrace-demo.gif)
+
 ## Why gtrace?
 
 | Feature | gtrace | mtr | traceroute |
