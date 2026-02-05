@@ -29,3 +29,8 @@ NOTES.md
 *.private
 .env
 .env.*
+
+# Demo outputs (keep .tape scripts, ignore generated media)
+demo/*.gif
+demo/*.mp4
+demo/*.webm
