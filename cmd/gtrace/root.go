@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -445,7 +446,18 @@ func runLocalTraceSimple(ctx context.Context, cmd *cobra.Command, cfg *Config, t
 }
 
 // runGlobalPingTrace runs a traceroute via GlobalPing API.
+// Uses MTR when not in simple mode for richer statistics.
 func runGlobalPingTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.TraceResult, error) {
+	// Use MTR for richer output when not in simple mode
+	if !cfg.Simple {
+		return runGlobalPingMTR(ctx, cmd, cfg)
+	}
+
+	return runGlobalPingTraceroute(ctx, cmd, cfg)
+}
+
+// runGlobalPingTraceroute runs a simple traceroute via GlobalPing API.
+func runGlobalPingTraceroute(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.TraceResult, error) {
 	// Create client
 	client := globalping.NewClient(cfg.APIKey)
 
@@ -506,6 +518,123 @@ func runGlobalPingTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*
 	}
 
 	return lastResult, nil
+}
+
+// runGlobalPingMTR runs an MTR measurement via GlobalPing API.
+func runGlobalPingMTR(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.TraceResult, error) {
+	// Create client
+	client := globalping.NewClient(cfg.APIKey)
+
+	// Parse locations
+	locations := globalping.ParseLocationStrings(cfg.From)
+
+	// Create MTR measurement request
+	req := &globalping.MeasurementRequest{
+		Type:      globalping.MeasurementTypeMTR,
+		Target:    cfg.Target,
+		Locations: locations,
+		Options: globalping.MeasurementOptions{
+			Protocol: strings.ToUpper(cfg.Protocol),
+		},
+		InProgressUpdates: true,
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "MTR to %s from %s via GlobalPing\n",
+		cfg.Target, cfg.From)
+	fmt.Fprintln(cmd.OutOrStdout(), "Creating measurement...")
+
+	// Create measurement
+	resp, err := client.CreateMeasurement(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create measurement: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Measurement ID: %s (%d probes)\n", resp.ID, resp.ProbesCount)
+	fmt.Fprintln(cmd.OutOrStdout(), "Waiting for results (MTR takes longer)...")
+
+	// Wait for MTR completion
+	measurement, err := client.WaitForMTRMeasurement(ctx, resp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get results: %w", err)
+	}
+
+	// Display MTR results from each probe
+	var lastResult *hop.TraceResult
+	for _, pr := range measurement.Results {
+		result := pr.ToTraceResult(cfg.Target)
+		lastResult = result
+
+		fmt.Fprintf(cmd.OutOrStdout(), "\n=== MTR from %s ===\n", result.Source)
+		fmt.Fprintf(cmd.OutOrStdout(), "Target: %s (%s)\n\n", cfg.Target, result.TargetIP)
+
+		// Display MTR-style header
+		fmt.Fprintf(cmd.OutOrStdout(), "%-3s  %-20s  %6s  %5s  %5s  %8s  %8s  %8s\n",
+			"Hop", "Host", "Loss%", "Sent", "Recv", "Best", "Avg", "Worst")
+
+		// Display each hop with MTR stats
+		for i, mh := range pr.Result.Hops {
+			displayMTRHop(cmd.OutOrStdout(), i+1, &mh)
+		}
+
+		if result.ReachedTarget {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nTarget reached in %d hops\n", result.TotalHops())
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nTarget not reached (%d hops)\n", result.TotalHops())
+		}
+	}
+
+	return lastResult, nil
+}
+
+// displayMTRHop displays a single MTR hop with statistics.
+func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
+	// Handle direct format (actual GlobalPing API response)
+	if mh.ResolvedAddress != "" {
+		host := mh.ResolvedAddress
+		if mh.ResolvedHostname != "" && mh.ResolvedHostname != mh.ResolvedAddress {
+			host = mh.ResolvedHostname
+		}
+		// Truncate long hostnames
+		if len(host) > 20 {
+			host = host[:17] + "..."
+		}
+
+		fmt.Fprintf(w, "%3d  %-20s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
+			ttl, host,
+			mh.Stats.Loss,
+			mh.Stats.Total,
+			mh.Stats.Rcv,
+			mh.Stats.Min,
+			mh.Stats.Avg,
+			mh.Stats.Max)
+		return
+	}
+
+	// Handle legacy format with resolvers array
+	if len(mh.Resolvers) == 0 {
+		fmt.Fprintf(w, "%3d  %-20s  %6s  %5s  %5s  %8s  %8s  %8s\n",
+			ttl, "???", "-", "-", "-", "-", "-", "-")
+		return
+	}
+
+	for _, r := range mh.Resolvers {
+		host := r.Address
+		if r.Hostname != "" && r.Hostname != r.Address {
+			host = r.Hostname
+		}
+		if len(host) > 20 {
+			host = host[:17] + "..."
+		}
+
+		fmt.Fprintf(w, "%3d  %-20s  %5.1f%%  %5d  %5d  %7.1fms  %7.1fms  %7.1fms\n",
+			ttl, host,
+			r.Stats.Loss,
+			r.Stats.Total,
+			r.Stats.Rcv,
+			r.Stats.Min,
+			r.Stats.Avg,
+			r.Stats.Max)
+	}
 }
 
 // runCompareMode runs local and remote traces concurrently and displays side-by-side.

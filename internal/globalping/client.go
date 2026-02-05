@@ -149,3 +149,68 @@ func (c *Client) setHeaders(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 }
+
+// GetMTRMeasurement retrieves the current state of an MTR measurement.
+func (c *Client) GetMTRMeasurement(ctx context.Context, id string) (*MTRMeasurementResult, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v1/measurements/"+id, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.setHeaders(httpReq)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result MTRMeasurementResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// WaitForMTRMeasurement polls until the MTR measurement is complete.
+func (c *Client) WaitForMTRMeasurement(ctx context.Context, id string) (*MTRMeasurementResult, error) {
+	ticker := time.NewTicker(c.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		result, err := c.GetMTRMeasurement(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+
+		if result.Status.IsComplete() {
+			return result, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			// Continue polling
+		}
+	}
+}
+
+// RunMTRMeasurement creates an MTR measurement and waits for completion.
+func (c *Client) RunMTRMeasurement(ctx context.Context, req *MeasurementRequest) (*MTRMeasurementResult, error) {
+	// Ensure we're using MTR type
+	req.Type = MeasurementTypeMTR
+
+	resp, err := c.CreateMeasurement(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create measurement: %w", err)
+	}
+
+	return c.WaitForMTRMeasurement(ctx, resp.ID)
+}

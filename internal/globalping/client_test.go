@@ -214,3 +214,101 @@ func TestClient_WaitForMeasurement_RespectsContext(t *testing.T) {
 		t.Error("expected error due to context cancellation")
 	}
 }
+
+func TestClient_GetMTRMeasurement_ReturnsResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(MTRMeasurementResult{
+			ID:     "test-mtr-id",
+			Type:   MeasurementTypeMTR,
+			Status: StatusFinished,
+			Results: []MTRProbeResult{
+				{
+					Probe: ProbeInfo{City: "London", Country: "GB"},
+					Result: MTRResult{
+						Status:          "finished",
+						ResolvedAddress: "8.8.8.8",
+						Hops: []MTRHop{
+							{
+								Resolvers: []MTRHopResolver{
+									{
+										Address:  "192.168.1.1",
+										Hostname: "router.local",
+										Stats: MTRStats{
+											Total: 10,
+											Rcv:   10,
+											Loss:  0,
+											Avg:   5.0,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	result, err := client.GetMTRMeasurement(context.Background(), "test-mtr-id")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ID != "test-mtr-id" {
+		t.Errorf("expected ID 'test-mtr-id', got %q", result.ID)
+	}
+	if result.Type != MeasurementTypeMTR {
+		t.Errorf("expected type 'mtr', got %q", result.Type)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	}
+	if len(result.Results[0].Result.Hops) != 1 {
+		t.Fatalf("expected 1 hop, got %d", len(result.Results[0].Result.Hops))
+	}
+}
+
+func TestClient_WaitForMTRMeasurement_PollsUntilComplete(t *testing.T) {
+	calls := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		status := StatusInProgress
+		if calls >= 2 {
+			status = StatusFinished
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(MTRMeasurementResult{
+			ID:     "test-mtr-id",
+			Type:   MeasurementTypeMTR,
+			Status: status,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+	client.pollInterval = 10 * time.Millisecond
+
+	result, err := client.WaitForMTRMeasurement(context.Background(), "test-mtr-id")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != StatusFinished {
+		t.Errorf("expected status 'finished', got %q", result.Status)
+	}
+	if calls < 2 {
+		t.Errorf("expected at least 2 calls, got %d", calls)
+	}
+}

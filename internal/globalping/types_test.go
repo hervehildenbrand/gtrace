@@ -117,9 +117,9 @@ func TestTracerouteHop_ToHop_ConvertsCorrectly(t *testing.T) {
 	th := &TracerouteHop{
 		Resolvers: []HopResolver{
 			{
-				Address: "192.168.1.1",
+				Address:  "192.168.1.1",
 				Hostname: "router.local",
-				ASN:     12345,
+				ASN:      12345,
 				Timings: []HopTiming{
 					{RTT: 5.5},
 					{RTT: 6.0},
@@ -138,5 +138,119 @@ func TestTracerouteHop_ToHop_ConvertsCorrectly(t *testing.T) {
 	}
 	if h.Enrichment.ASN != 12345 {
 		t.Errorf("expected ASN 12345, got %d", h.Enrichment.ASN)
+	}
+}
+
+func TestMTRHop_ToHop_ConvertsCorrectly(t *testing.T) {
+	mh := &MTRHop{
+		Resolvers: []MTRHopResolver{
+			{
+				Address:  "192.168.1.1",
+				Hostname: "router.local",
+				ASN:      12345,
+				Network:  "Example Network",
+				Stats: MTRStats{
+					Total:  10,
+					Loss:   10.0,
+					Rcv:    9,
+					Drop:   1,
+					Min:    1.5,
+					Avg:    2.5,
+					Max:    5.0,
+					StDev:  0.8,
+				},
+			},
+		},
+	}
+
+	h := mh.ToHop(3)
+
+	if h.TTL != 3 {
+		t.Errorf("expected TTL 3, got %d", h.TTL)
+	}
+	if h.Enrichment.ASN != 12345 {
+		t.Errorf("expected ASN 12345, got %d", h.Enrichment.ASN)
+	}
+	if h.Enrichment.ASOrg != "Example Network" {
+		t.Errorf("expected ASOrg 'Example Network', got %q", h.Enrichment.ASOrg)
+	}
+}
+
+func TestMTRHop_ToHop_HandlesTimeout(t *testing.T) {
+	mh := &MTRHop{
+		Resolvers: []MTRHopResolver{}, // No resolvers = timeout
+	}
+
+	h := mh.ToHop(2)
+
+	if h.TTL != 2 {
+		t.Errorf("expected TTL 2, got %d", h.TTL)
+	}
+	if len(h.Probes) != 1 {
+		t.Fatalf("expected 1 probe (timeout), got %d", len(h.Probes))
+	}
+	if !h.Probes[0].Timeout {
+		t.Error("expected timeout probe")
+	}
+}
+
+func TestMTRProbeResult_ToTraceResult_ConvertsCorrectly(t *testing.T) {
+	pr := &MTRProbeResult{
+		Probe: ProbeInfo{
+			City:    "London",
+			Country: "GB",
+			Network: "Test ISP",
+		},
+		Result: MTRResult{
+			Status:          "finished",
+			ResolvedAddress: "8.8.8.8",
+			Hops: []MTRHop{
+				{
+					Resolvers: []MTRHopResolver{
+						{
+							Address: "192.168.1.1",
+							Stats:   MTRStats{Avg: 1.0, Total: 10, Rcv: 10},
+						},
+					},
+				},
+				{
+					Resolvers: []MTRHopResolver{
+						{
+							Address: "8.8.8.8",
+							Stats:   MTRStats{Avg: 5.0, Total: 10, Rcv: 10},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := pr.ToTraceResult("google.com")
+
+	if result.Target != "google.com" {
+		t.Errorf("expected target 'google.com', got %q", result.Target)
+	}
+	if result.TargetIP != "8.8.8.8" {
+		t.Errorf("expected targetIP '8.8.8.8', got %q", result.TargetIP)
+	}
+	if len(result.Hops) != 2 {
+		t.Fatalf("expected 2 hops, got %d", len(result.Hops))
+	}
+	if !result.ReachedTarget {
+		t.Error("expected ReachedTarget to be true")
+	}
+}
+
+func TestMTRStats_LossPercent(t *testing.T) {
+	stats := MTRStats{
+		Total: 10,
+		Rcv:   9,
+		Drop:  1,
+		Loss:  10.0,
+	}
+
+	// Loss is already provided as percentage by GlobalPing API
+	if stats.Loss != 10.0 {
+		t.Errorf("expected Loss 10.0%%, got %.1f%%", stats.Loss)
 	}
 }
