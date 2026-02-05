@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 func TestTracerConfig_DefaultValues(t *testing.T) {
@@ -15,11 +15,12 @@ func TestTracerConfig_DefaultValues(t *testing.T) {
 	if cfg.MaxHops != 30 {
 		t.Errorf("expected MaxHops 30, got %d", cfg.MaxHops)
 	}
-	if cfg.PacketsPerHop != 3 {
-		t.Errorf("expected PacketsPerHop 3, got %d", cfg.PacketsPerHop)
+	// MTR-style defaults: 1 packet per hop, 500ms timeout
+	if cfg.PacketsPerHop != 1 {
+		t.Errorf("expected PacketsPerHop 1 (MTR-style), got %d", cfg.PacketsPerHop)
 	}
-	if cfg.Timeout != 3*time.Second {
-		t.Errorf("expected Timeout 3s, got %v", cfg.Timeout)
+	if cfg.Timeout != 500*time.Millisecond {
+		t.Errorf("expected Timeout 500ms (MTR-style), got %v", cfg.Timeout)
 	}
 	if cfg.Protocol != ProtocolICMP {
 		t.Errorf("expected Protocol ICMP, got %v", cfg.Protocol)

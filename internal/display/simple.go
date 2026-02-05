@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // SimpleRenderer renders traceroute results in traditional text format.

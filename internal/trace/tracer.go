@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // Protocol represents the traceroute protocol to use.
@@ -30,13 +30,14 @@ type Config struct {
 }
 
 // DefaultConfig returns the default traceroute configuration.
+// Uses MTR-style defaults: 1 packet per hop, 500ms timeout for faster response.
 func DefaultConfig() *Config {
 	return &Config{
 		Protocol:      ProtocolICMP,
 		MaxHops:       30,
-		PacketsPerHop: 3,
-		Timeout:       3 * time.Second,
-		Port:          33434, // Default UDP port
+		PacketsPerHop: 1,                      // MTR-style: 1 probe per hop per cycle
+		Timeout:       500 * time.Millisecond, // MTR-style: faster timeout
+		Port:          33434,                  // Default UDP port
 	}
 }
 

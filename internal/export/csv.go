@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // CSVExporter exports trace results to CSV format.

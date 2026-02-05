@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // MeasurementType represents the type of measurement.

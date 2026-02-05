@@ -1,7 +1,7 @@
 package trace
 
 import (
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // MPLS extension constants per RFC 4950

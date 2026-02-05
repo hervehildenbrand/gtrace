@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
@@ -51,7 +51,7 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 		reached := false
 
 		for i := 0; i < t.config.PacketsPerHop; i++ {
-			ip, rtt, err := t.sendProbe(conn, target, ttl, i)
+			pr, err := t.sendProbe(conn, target, ttl, i)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
 					h.AddTimeout()
@@ -62,8 +62,14 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 				continue
 			}
 
-			h.AddProbe(ip, rtt)
-			if ip.Equal(target) {
+			h.AddProbe(pr.IP, pr.RTT)
+
+			// Set MPLS labels if discovered (first probe with labels wins)
+			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
+				h.SetMPLS(pr.MPLS)
+			}
+
+			if pr.IP.Equal(target) {
 				reached = true
 			}
 		}
@@ -83,31 +89,38 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 	return result, nil
 }
 
+// probeResult holds the result of a single probe including MPLS labels.
+type probeResult struct {
+	IP   net.IP
+	RTT  time.Duration
+	MPLS []hop.MPLSLabel
+}
+
 // sendProbe sends a single ICMP probe and waits for response.
-func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq int) (net.IP, time.Duration, error) {
+func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
 	// Set TTL for this probe
 	if err := conn.IPv4PacketConn().SetTTL(ttl); err != nil {
-		return nil, 0, fmt.Errorf("failed to set TTL: %w", err)
+		return nil, fmt.Errorf("failed to set TTL: %w", err)
 	}
 
 	// Build and send ICMP Echo Request
 	msg := t.buildEchoRequest(ttl, seq)
 	msgBytes, err := msg.Marshal(nil)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to marshal ICMP message: %w", err)
+		return nil, fmt.Errorf("failed to marshal ICMP message: %w", err)
 	}
 
 	start := time.Now()
 
 	_, err = conn.WriteTo(msgBytes, &net.IPAddr{IP: target})
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to send ICMP: %w", err)
+		return nil, fmt.Errorf("failed to send ICMP: %w", err)
 	}
 
 	// Set read deadline
 	deadline := start.Add(t.config.Timeout)
 	if err := conn.SetReadDeadline(deadline); err != nil {
-		return nil, 0, fmt.Errorf("failed to set deadline: %w", err)
+		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
 	// Wait for response
@@ -115,7 +128,7 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 	for {
 		n, peer, err := conn.ReadFrom(reply)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 
 		end := time.Now()
@@ -134,7 +147,7 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 			// Check if this is our reply
 			if body, ok := rm.Body.(*icmp.Echo); ok {
 				if body.ID == t.id {
-					return peerIP, rtt, nil
+					return &probeResult{IP: peerIP, RTT: rtt}, nil
 				}
 			}
 
@@ -147,19 +160,34 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 					// Original ICMP header starts at offset 20 (after IP header)
 					origID := int(body.Data[24])<<8 | int(body.Data[25])
 					if origID == t.id {
-						return peerIP, rtt, nil
+						// Extract MPLS labels from the raw ICMP data
+						// The reply contains ICMP header (8 bytes) + body
+						// MPLS extensions are in the body after the original datagram
+						var mplsLabels []hop.MPLSLabel
+						if n > 8 {
+							mplsLabels = ExtractMPLSFromICMP(reply[8:n])
+						}
+						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels}, nil
 					}
 				}
 			}
 
 		case ipv4.ICMPTypeDestinationUnreachable:
 			// Destination unreachable - target reached but port/protocol unreachable
-			return peerIP, rtt, nil
+			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
+				// Validate this is our probe by checking the original ICMP ID
+				if len(body.Data) >= 28 {
+					origID := int(body.Data[24])<<8 | int(body.Data[25])
+					if origID == t.id {
+						return &probeResult{IP: peerIP, RTT: rtt}, nil
+					}
+				}
+			}
 		}
 
 		// Check if we've exceeded deadline
 		if time.Now().After(deadline) {
-			return nil, 0, context.DeadlineExceeded
+			return nil, context.DeadlineExceeded
 		}
 	}
 }

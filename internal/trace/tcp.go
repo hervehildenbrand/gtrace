@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
@@ -51,7 +51,7 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 		reached := false
 
 		for i := 0; i < t.config.PacketsPerHop; i++ {
-			ip, rtt, err := t.sendProbe(icmpConn, target, ttl, i)
+			pr, err := t.sendProbe(icmpConn, target, ttl, i)
 			if err != nil {
 				if isTimeout(err) {
 					h.AddTimeout()
@@ -61,8 +61,14 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
-			h.AddProbe(ip, rtt)
-			if ip.Equal(target) {
+			h.AddProbe(pr.IP, pr.RTT)
+
+			// Set MPLS labels if discovered (first probe with labels wins)
+			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
+				h.SetMPLS(pr.MPLS)
+			}
+
+			if pr.IP.Equal(target) {
 				reached = true
 			}
 		}
@@ -83,24 +89,24 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 }
 
 // sendProbe sends a single TCP SYN probe and waits for response.
-func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq int) (net.IP, time.Duration, error) {
+func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
 	port := t.getPort()
 
 	// Create TCP socket
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create TCP socket: %w", err)
+		return nil, fmt.Errorf("failed to create TCP socket: %w", err)
 	}
 	defer syscall.Close(fd)
 
 	// Set TTL
 	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_TTL, ttl); err != nil {
-		return nil, 0, fmt.Errorf("failed to set TTL: %w", err)
+		return nil, fmt.Errorf("failed to set TTL: %w", err)
 	}
 
 	// Set non-blocking
 	if err := syscall.SetNonblock(fd, true); err != nil {
-		return nil, 0, fmt.Errorf("failed to set non-blocking: %w", err)
+		return nil, fmt.Errorf("failed to set non-blocking: %w", err)
 	}
 
 	// Build destination address
@@ -119,14 +125,14 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	if err != nil && err != syscall.EINPROGRESS {
 		// Check if we got a connection refused (RST) - means target reached
 		if err == syscall.ECONNREFUSED {
-			return target, time.Since(start), nil
+			return &probeResult{IP: target, RTT: time.Since(start)}, nil
 		}
 	}
 
 	// Set read deadline on ICMP socket
 	deadline := start.Add(t.config.Timeout)
 	if err := icmpConn.SetReadDeadline(deadline); err != nil {
-		return nil, 0, fmt.Errorf("failed to set deadline: %w", err)
+		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
 	// Wait for ICMP response or TCP connection
@@ -134,17 +140,17 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	for {
 		// Check if TCP connection completed (SYN-ACK received)
 		if t.checkTCPConnection(fd) {
-			return target, time.Since(start), nil
+			return &probeResult{IP: target, RTT: time.Since(start)}, nil
 		}
 
 		n, peer, err := icmpConn.ReadFrom(reply)
 		if err != nil {
 			if isTimeout(err) {
-				return nil, 0, err
+				return nil, err
 			}
 			// Keep trying until deadline
 			if time.Now().After(deadline) {
-				return nil, 0, &timeoutError{}
+				return nil, &timeoutError{}
 			}
 			continue
 		}
@@ -165,7 +171,12 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 			// Intermediate hop
 			if body, ok := rm.Body.(*icmp.TimeExceeded); ok {
 				if t.isOurProbe(body.Data, port) {
-					return peerIP, rtt, nil
+					// Extract MPLS labels from the raw ICMP data
+					var mplsLabels []hop.MPLSLabel
+					if n > 8 {
+						mplsLabels = ExtractMPLSFromICMP(reply[8:n])
+					}
+					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels}, nil
 				}
 			}
 
@@ -173,14 +184,14 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 			// Target reached but filtered
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
 				if t.isOurProbe(body.Data, port) {
-					return peerIP, rtt, nil
+					return &probeResult{IP: peerIP, RTT: rtt}, nil
 				}
 			}
 		}
 
 		// Check deadline
 		if time.Now().After(deadline) {
-			return nil, 0, &timeoutError{}
+			return nil, &timeoutError{}
 		}
 	}
 }
@@ -197,7 +208,26 @@ func (t *TCPTracer) getTCPID() int {
 
 // checkTCPConnection checks if the TCP connection has completed.
 func (t *TCPTracer) checkTCPConnection(fd int) bool {
-	// Use getsockopt to check connection status
+	// Use select with zero timeout to check if socket is writable
+	// A non-blocking socket becomes writable when connection completes (or fails)
+	var writeSet syscall.FdSet
+	writeSet.Bits[fd/64] |= 1 << (uint(fd) % 64)
+
+	// Zero timeout = poll, don't block
+	tv := syscall.Timeval{Sec: 0, Usec: 0}
+
+	err := syscall.Select(fd+1, nil, &writeSet, nil, &tv)
+	if err != nil {
+		return false
+	}
+
+	// Check if our fd is set in the write set (socket is writable)
+	if writeSet.Bits[fd/64]&(1<<(uint(fd)%64)) == 0 {
+		// Not ready yet
+		return false
+	}
+
+	// Socket is writable - check SO_ERROR to see if connection succeeded or failed
 	val, err := syscall.GetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_ERROR)
 	if err != nil {
 		return false

@@ -5,12 +5,14 @@ import (
 	"net"
 	"sync"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
-// Enricher provides IP enrichment by combining ASN and rDNS lookups.
+// Enricher provides IP enrichment by combining ASN, GeoIP, IX, and rDNS lookups.
 type Enricher struct {
 	asn   *ASNLookup
+	geo   *GeoLookup
+	ix    *IXLookup
 	rdns  *RDNSLookup
 	cache *Cache
 }
@@ -19,6 +21,8 @@ type Enricher struct {
 func NewEnricher() *Enricher {
 	return &Enricher{
 		asn:   NewASNLookup(),
+		geo:   NewGeoLookup(),
+		ix:    NewIXLookup(),
 		rdns:  NewRDNSLookup(),
 		cache: NewCache(10000), // Cache up to 10k IPs
 	}
@@ -53,6 +57,35 @@ func (e *Enricher) EnrichIP(ctx context.Context, ip net.IP) (*hop.Enrichment, er
 			if result.Country == "" {
 				result.Country = asnResult.Country
 			}
+			mu.Unlock()
+		}
+	}()
+
+	// GeoIP lookup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		geoResult, err := e.geo.Lookup(ctx, ip)
+		if err == nil && geoResult != nil && !geoResult.IsEmpty() {
+			mu.Lock()
+			if geoResult.City != "" {
+				result.City = geoResult.City
+			}
+			if geoResult.Country != "" && result.Country == "" {
+				result.Country = geoResult.Country
+			}
+			mu.Unlock()
+		}
+	}()
+
+	// IX lookup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ixResult, err := e.ix.Lookup(ctx, ip)
+		if err == nil && ixResult != nil && ixResult.IsIX() {
+			mu.Lock()
+			result.IX = ixResult.Name
 			mu.Unlock()
 		}
 	}()

@@ -3,7 +3,7 @@ package trace
 import (
 	"testing"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 func TestParseMPLSExtensions_ParsesSingleLabel(t *testing.T) {

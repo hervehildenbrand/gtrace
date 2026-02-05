@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // ChangeType represents the type of change detected.

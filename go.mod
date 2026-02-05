@@ -1,4 +1,4 @@
-module github.com/hervehildenbrand/gtr
+module github.com/hervehildenbrand/gtrace
 
 go 1.25.6
 

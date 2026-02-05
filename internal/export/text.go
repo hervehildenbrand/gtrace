@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // TextExporter exports trace results to human-readable text format.

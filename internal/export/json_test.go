@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 func TestJSONExporter_Export_ProducesValidJSON(t *testing.T) {

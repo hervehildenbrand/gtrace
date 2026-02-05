@@ -3,7 +3,7 @@ package enrich
 import (
 	"sync"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 // CacheStats contains cache statistics.

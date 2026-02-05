@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
 func TestNewEnricher_CreatesWithDefaults(t *testing.T) {

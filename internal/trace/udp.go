@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hervehildenbrand/gtr/pkg/hop"
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
@@ -53,7 +53,7 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 
 		for i := 0; i < t.config.PacketsPerHop; i++ {
 			probeNum++
-			ip, rtt, err := t.sendProbe(icmpConn, target, ttl, probeNum)
+			pr, err := t.sendProbe(icmpConn, target, ttl, probeNum)
 			if err != nil {
 				if isTimeout(err) {
 					h.AddTimeout()
@@ -63,8 +63,14 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
-			h.AddProbe(ip, rtt)
-			if ip.Equal(target) {
+			h.AddProbe(pr.IP, pr.RTT)
+
+			// Set MPLS labels if discovered (first probe with labels wins)
+			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
+				h.SetMPLS(pr.MPLS)
+			}
+
+			if pr.IP.Equal(target) {
 				reached = true
 			}
 		}
@@ -85,19 +91,19 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 }
 
 // sendProbe sends a single UDP probe and waits for ICMP response.
-func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq int) (net.IP, time.Duration, error) {
+func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
 	port := t.getPort(seq)
 
 	// Create UDP socket with specific TTL
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create UDP socket: %w", err)
+		return nil, fmt.Errorf("failed to create UDP socket: %w", err)
 	}
 	defer syscall.Close(fd)
 
 	// Set TTL
 	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_IP, syscall.IP_TTL, ttl); err != nil {
-		return nil, 0, fmt.Errorf("failed to set TTL: %w", err)
+		return nil, fmt.Errorf("failed to set TTL: %w", err)
 	}
 
 	// Build destination address
@@ -115,13 +121,13 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 
 	// Send UDP packet
 	if err := syscall.Sendto(fd, payload, 0, sa); err != nil {
-		return nil, 0, fmt.Errorf("failed to send UDP: %w", err)
+		return nil, fmt.Errorf("failed to send UDP: %w", err)
 	}
 
 	// Set read deadline on ICMP socket
 	deadline := start.Add(t.config.Timeout)
 	if err := icmpConn.SetReadDeadline(deadline); err != nil {
-		return nil, 0, fmt.Errorf("failed to set deadline: %w", err)
+		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
 	// Wait for ICMP response
@@ -129,7 +135,7 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	for {
 		n, peer, err := icmpConn.ReadFrom(reply)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 
 		end := time.Now()
@@ -148,7 +154,12 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 			// Intermediate hop
 			if body, ok := rm.Body.(*icmp.TimeExceeded); ok {
 				if t.isOurProbe(body.Data, port) {
-					return peerIP, rtt, nil
+					// Extract MPLS labels from the raw ICMP data
+					var mplsLabels []hop.MPLSLabel
+					if n > 8 {
+						mplsLabels = ExtractMPLSFromICMP(reply[8:n])
+					}
+					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels}, nil
 				}
 			}
 
@@ -156,14 +167,14 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 			// Target reached (port unreachable)
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
 				if t.isOurProbe(body.Data, port) {
-					return peerIP, rtt, nil
+					return &probeResult{IP: peerIP, RTT: rtt}, nil
 				}
 			}
 		}
 
 		// Check deadline
 		if time.Now().After(deadline) {
-			return nil, 0, &net.OpError{Op: "read", Err: &timeoutError{}}
+			return nil, &net.OpError{Op: "read", Err: &timeoutError{}}
 		}
 	}
 }
