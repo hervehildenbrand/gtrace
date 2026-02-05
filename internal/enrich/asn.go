@@ -3,11 +3,14 @@ package enrich
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ASNResult contains the result of an ASN lookup.
@@ -33,9 +36,15 @@ func NewASNLookup() *ASNLookup {
 }
 
 // Lookup performs an ASN lookup for the given IP.
+// Uses Team Cymru DNS first, falls back to ip-api.com for better coverage.
 func (l *ASNLookup) Lookup(ctx context.Context, ip net.IP) (*ASNResult, error) {
 	if ip == nil {
 		return nil, errors.New("nil IP address")
+	}
+
+	// Skip private IPs
+	if IsPrivateIP(ip) {
+		return nil, errors.New("private IP address")
 	}
 
 	// Only IPv4 for now
@@ -44,6 +53,18 @@ func (l *ASNLookup) Lookup(ctx context.Context, ip net.IP) (*ASNResult, error) {
 		return nil, errors.New("IPv6 not yet supported")
 	}
 
+	// Try Team Cymru DNS first
+	result, err := l.lookupCymru(ctx, ip4)
+	if err == nil && result.ASN > 0 {
+		return result, nil
+	}
+
+	// Fallback to ip-api.com for better coverage
+	return l.lookupIPAPI(ctx, ip)
+}
+
+// lookupCymru performs ASN lookup via Team Cymru DNS.
+func (l *ASNLookup) lookupCymru(ctx context.Context, ip4 net.IP) (*ASNResult, error) {
 	// Query origin ASN
 	query := l.formatQuery(ip4)
 	records, err := l.resolver.LookupTXT(ctx, query)
@@ -69,6 +90,69 @@ func (l *ASNLookup) Lookup(ctx context.Context, ip net.IP) (*ASNResult, error) {
 	}
 
 	return result, nil
+}
+
+// ipAPIResponse represents the response from ip-api.com
+type ipAPIResponse struct {
+	Status  string `json:"status"`
+	AS      string `json:"as"`      // e.g., "AS3215 Orange S.A."
+	ASName  string `json:"asname"`  // e.g., "Orange S.A."
+	ISP     string `json:"isp"`
+	Org     string `json:"org"`
+	Country string `json:"countryCode"`
+}
+
+// lookupIPAPI performs ASN lookup via ip-api.com (fallback).
+func (l *ASNLookup) lookupIPAPI(ctx context.Context, ip net.IP) (*ASNResult, error) {
+	url := fmt.Sprintf("http://ip-api.com/json/%s?fields=status,as,asname,isp,org,countryCode", ip.String())
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp ipAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Status != "success" {
+		return nil, errors.New("ip-api lookup failed")
+	}
+
+	// Parse ASN from "AS3215 Orange S.A." format
+	var asn uint32
+	if apiResp.AS != "" {
+		parts := strings.SplitN(apiResp.AS, " ", 2)
+		if len(parts) > 0 && strings.HasPrefix(parts[0], "AS") {
+			asnNum, err := strconv.ParseUint(strings.TrimPrefix(parts[0], "AS"), 10, 32)
+			if err == nil {
+				asn = uint32(asnNum)
+			}
+		}
+	}
+
+	// Get organization name: prefer ASName, then ISP, then Org
+	name := apiResp.ASName
+	if name == "" {
+		name = apiResp.ISP
+	}
+	if name == "" {
+		name = apiResp.Org
+	}
+
+	return &ASNResult{
+		ASN:     asn,
+		Name:    name,
+		Country: apiResp.Country,
+	}, nil
 }
 
 // formatQuery creates the DNS query for IP to ASN lookup.

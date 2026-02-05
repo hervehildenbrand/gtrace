@@ -97,16 +97,22 @@ func (r *CompareRenderer) formatHopColumn(tr *hop.TraceResult, index int) string
 		host = h.Enrichment.Hostname
 	}
 
-	// Format with or without ASN
+	// Format with ASN, org name, or neither
 	rtt := r.formatRTT(h.AvgRTT())
 	if h.Enrichment.ASN > 0 {
-		// With ASN: shorter host to fit
+		// With ASN number
 		host = r.truncateHost(host, 12)
 		asn := fmt.Sprintf("AS%d", h.Enrichment.ASN)
 		return fmt.Sprintf("%2d  %-12s %-7s %s", ttl, host, asn, rtt)
 	}
+	if h.Enrichment.ASOrg != "" {
+		// With org name but no ASN number (ISP name from ip-api)
+		host = r.truncateHost(host, 12)
+		org := r.truncateHost(h.Enrichment.ASOrg, 7)
+		return fmt.Sprintf("%2d  %-12s %-7s %s", ttl, host, org, rtt)
+	}
 
-	// Without ASN: more space for host
+	// Without ASN or org: more space for host
 	host = r.truncateHost(host, 18)
 	return fmt.Sprintf("%2d  %-18s  %s", ttl, host, rtt)
 }
