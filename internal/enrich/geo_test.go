@@ -107,6 +107,33 @@ func TestIsPrivateIP(t *testing.T) {
 	}
 }
 
+func TestIsPrivateIP_IPv6(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		expected bool
+	}{
+		{"IPv6 loopback", "::1", true},
+		{"IPv6 ULA fc00::", "fc00::1", true},
+		{"IPv6 ULA fd00::", "fd00::1", true},
+		{"IPv6 link-local", "fe80::1", true},
+		{"IPv6 public Google DNS", "2001:4860:4860::8888", false},
+		{"IPv6 public Cloudflare", "2606:4700:4700::1111", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if ip == nil {
+				t.Fatalf("failed to parse IP: %s", tt.ip)
+			}
+			if got := IsPrivateIP(ip); got != tt.expected {
+				t.Errorf("IsPrivateIP(%s) = %v, want %v", tt.ip, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestNewGeoLookup(t *testing.T) {
 	lookup := NewGeoLookup()
 	if lookup == nil {

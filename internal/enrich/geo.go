@@ -124,6 +124,7 @@ func DefaultGeoDBPath() string {
 }
 
 // IsPrivateIP checks if an IP address is private/local.
+// Supports both IPv4 and IPv6 addresses.
 func IsPrivateIP(ip net.IP) bool {
 	if ip == nil {
 		return false
@@ -139,7 +140,7 @@ func IsPrivateIP(ip net.IP) bool {
 		return true
 	}
 
-	// Check for private ranges
+	// Check for IPv4 private ranges
 	if ip4 := ip.To4(); ip4 != nil {
 		// 10.0.0.0/8
 		if ip4[0] == 10 {
@@ -156,6 +157,17 @@ func IsPrivateIP(ip net.IP) bool {
 		// 169.254.0.0/16 (link-local)
 		if ip4[0] == 169 && ip4[1] == 254 {
 			return true
+		}
+	} else {
+		// IPv6 - check for Unique Local Addresses (ULA)
+		// fc00::/7 - first byte is 0xfc or 0xfd
+		ip16 := ip.To16()
+		if ip16 != nil && len(ip16) == 16 {
+			// fc00::/7 means first 7 bits are 1111110
+			// This covers both fc00::/8 and fd00::/8
+			if (ip16[0] & 0xfe) == 0xfc {
+				return true
+			}
 		}
 	}
 
