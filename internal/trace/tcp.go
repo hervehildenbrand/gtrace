@@ -214,20 +214,8 @@ func (t *TCPTracer) getTCPID() int {
 func (t *TCPTracer) checkTCPConnection(fd int) bool {
 	// Use select with zero timeout to check if socket is writable
 	// A non-blocking socket becomes writable when connection completes (or fails)
-	var writeSet syscall.FdSet
-	writeSet.Bits[fd/64] |= 1 << (uint(fd) % 64)
-
-	// Zero timeout = poll, don't block
-	tv := syscall.Timeval{Sec: 0, Usec: 0}
-
-	err := syscall.Select(fd+1, nil, &writeSet, nil, &tv)
-	if err != nil {
-		return false
-	}
-
-	// Check if our fd is set in the write set (socket is writable)
-	if writeSet.Bits[fd/64]&(1<<(uint(fd)%64)) == 0 {
-		// Not ready yet
+	ready, err := selectWrite(fd)
+	if err != nil || !ready {
 		return false
 	}
 
