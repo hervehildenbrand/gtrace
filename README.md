@@ -1,10 +1,27 @@
 # gtrace
 
+[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hervehildenbrand/gtrace)](https://goreportcard.com/report/github.com/hervehildenbrand/gtrace)
+
 Advanced network path analysis tool combining local traceroute with GlobalPing's distributed probe network.
+
+## Why gtrace?
+
+| Feature | gtrace | mtr | traceroute |
+|---------|--------|-----|------------|
+| MPLS label detection | Yes | No | No |
+| ECMP/load balancing detection | Yes | No | No |
+| GlobalPing integration | Yes | No | No |
+| ASN + geolocation enrichment | Yes | Partial | No |
+| IPv4/IPv6 dual-stack | Yes | Yes | Yes |
+| MTR-style continuous mode | Yes | Yes | No |
+| JSON/CSV export | Yes | Yes | No |
 
 ## Features
 
 - **Multi-Protocol Traceroute**: ICMP, UDP, and TCP probing
+- **IPv4/IPv6 Support**: Dual-stack with `-4` and `-6` flags
 - **MPLS Detection**: Extract and display MPLS label stacks from ICMP extensions
 - **ECMP Detection**: Identify load-balanced paths with multiple IPs per hop
 - **Rich Enrichment**: ASN lookup, reverse DNS, geolocation, IX detection
@@ -45,6 +62,12 @@ sudo gtrace 8.8.8.8
 
 # Compare local and remote traces
 sudo gtrace 8.8.8.8 --compare --from "New York,London"
+
+# IPv6 traceroute
+sudo gtrace -6 google.com --simple
+
+# Compare IPv6 local vs remote
+sudo gtrace -6 google.com --compare --from Paris
 ```
 
 ## Usage
@@ -53,6 +76,8 @@ sudo gtrace 8.8.8.8 --compare --from "New York,London"
 
 | Flag | Description | Default |
 |------|-------------|---------|
+| `-4, --ipv4` | Force IPv4 only | false |
+| `-6, --ipv6` | Force IPv6 only | false |
 | `--protocol` | Protocol: icmp, udp, tcp | icmp |
 | `--port` | Target port (TCP/UDP) | 33434 |
 | `--max-hops` | Maximum TTL | 30 |
@@ -70,6 +95,7 @@ sudo gtrace 8.8.8.8 --compare --from "New York,London"
 **Keyboard shortcuts in MTR mode:**
 - `p` - Pause/Resume
 - `r` - Reset statistics
+- `n` - Toggle DNS/IP display
 - `q` - Quit
 
 ### GlobalPing Integration
@@ -120,6 +146,16 @@ Multiple IPs at the same hop indicate ECMP:
  8  141.101.67.83  141.101.67.95  141.101.67.115  [AS13335]  3.44ms
 ```
 
+### IPv6 Traceroute
+
+```bash
+# Force IPv6
+sudo gtrace -6 google.com --simple
+
+# Compare IPv6 paths from different locations
+sudo gtrace -6 cloudflare.com --compare --from "Frankfurt,Singapore"
+```
+
 ### Export to JSON
 
 ```bash
@@ -166,7 +202,7 @@ gtrace/
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.24+
 - Root/sudo privileges for raw socket access
 - Optional: MaxMind GeoIP databases for offline geolocation
 

@@ -70,6 +70,17 @@ func getAddressFamily(cfg *Config) trace.AddressFamily {
 	return trace.AddressFamilyAuto
 }
 
+// getIPVersion returns the IP version for GlobalPing API (4, 6, or 0 for auto).
+func getIPVersion(cfg *Config) int {
+	if cfg.IPv4Only {
+		return 4
+	}
+	if cfg.IPv6Only {
+		return 6
+	}
+	return 0 // Auto - let GlobalPing decide
+}
+
 // NewRootCmd creates and returns the root cobra command.
 func NewRootCmd() *cobra.Command {
 	var cfg Config
@@ -502,7 +513,8 @@ func runGlobalPingTraceroute(ctx context.Context, cmd *cobra.Command, cfg *Confi
 		Target:    cfg.Target,
 		Locations: locations,
 		Options: globalping.MeasurementOptions{
-			Protocol: strings.ToUpper(cfg.Protocol),
+			Protocol:  strings.ToUpper(cfg.Protocol),
+			IPVersion: getIPVersion(cfg),
 		},
 		InProgressUpdates: true,
 	}
@@ -566,7 +578,8 @@ func runGlobalPingMTR(ctx context.Context, cmd *cobra.Command, cfg *Config) (*ho
 		Target:    cfg.Target,
 		Locations: locations,
 		Options: globalping.MeasurementOptions{
-			Protocol: strings.ToUpper(cfg.Protocol),
+			Protocol:  strings.ToUpper(cfg.Protocol),
+			IPVersion: getIPVersion(cfg),
 		},
 		InProgressUpdates: true,
 	}
@@ -793,7 +806,8 @@ func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config)
 		Target:    cfg.Target,
 		Locations: locations,
 		Options: globalping.MeasurementOptions{
-			Protocol: strings.ToUpper(cfg.Protocol),
+			Protocol:  strings.ToUpper(cfg.Protocol),
+			IPVersion: getIPVersion(cfg),
 		},
 		InProgressUpdates: true,
 	}

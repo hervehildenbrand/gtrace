@@ -513,3 +513,24 @@ func TestRootCommand_IPv6DefaultsFalse(t *testing.T) {
 		t.Error("expected ipv6 to be false by default")
 	}
 }
+
+func TestGetIPVersion_Default(t *testing.T) {
+	cfg := &Config{}
+	if v := getIPVersion(cfg); v != 0 {
+		t.Errorf("expected 0 (auto) for default config, got %d", v)
+	}
+}
+
+func TestGetIPVersion_IPv4Only(t *testing.T) {
+	cfg := &Config{IPv4Only: true}
+	if v := getIPVersion(cfg); v != 4 {
+		t.Errorf("expected 4 for IPv4Only, got %d", v)
+	}
+}
+
+func TestGetIPVersion_IPv6Only(t *testing.T) {
+	cfg := &Config{IPv6Only: true}
+	if v := getIPVersion(cfg); v != 6 {
+		t.Errorf("expected 6 for IPv6Only, got %d", v)
+	}
+}

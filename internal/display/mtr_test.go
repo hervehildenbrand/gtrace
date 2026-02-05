@@ -253,3 +253,100 @@ func TestMTRModel_MaxTTL(t *testing.T) {
 		t.Errorf("expected maxTTL 5, got %d", mtr.maxTTL)
 	}
 }
+
+func TestMTRModel_KeyMsg_ToggleDisplayMode(t *testing.T) {
+	model := NewMTRModel("google.com", "8.8.8.8")
+
+	// Initial mode should be DisplayModeHostname
+	if model.displayMode != DisplayModeHostname {
+		t.Errorf("expected initial displayMode to be DisplayModeHostname, got %d", model.displayMode)
+	}
+
+	// Press 'n' to toggle to DisplayModeIP
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
+	newModel, _ := model.Update(msg)
+	m := newModel.(*MTRModel)
+
+	if m.displayMode != DisplayModeIP {
+		t.Errorf("expected displayMode DisplayModeIP after first 'n', got %d", m.displayMode)
+	}
+
+	// Press 'n' again to toggle to DisplayModeBoth
+	newModel, _ = m.Update(msg)
+	m = newModel.(*MTRModel)
+
+	if m.displayMode != DisplayModeBoth {
+		t.Errorf("expected displayMode DisplayModeBoth after second 'n', got %d", m.displayMode)
+	}
+
+	// Press 'n' again to wrap back to DisplayModeHostname
+	newModel, _ = m.Update(msg)
+	m = newModel.(*MTRModel)
+
+	if m.displayMode != DisplayModeHostname {
+		t.Errorf("expected displayMode DisplayModeHostname after third 'n', got %d", m.displayMode)
+	}
+}
+
+func TestMTRModel_IPv6Detection(t *testing.T) {
+	// IPv4 target
+	modelV4 := NewMTRModel("google.com", "8.8.8.8")
+	if modelV4.isIPv6 {
+		t.Error("expected isIPv6 false for IPv4 target")
+	}
+	if modelV4.getHostColumnWidth() != colHostIPv4 {
+		t.Errorf("expected column width %d for IPv4, got %d", colHostIPv4, modelV4.getHostColumnWidth())
+	}
+
+	// IPv6 target
+	modelV6 := NewMTRModel("google.com", "2001:4860:4860::8888")
+	if !modelV6.isIPv6 {
+		t.Error("expected isIPv6 true for IPv6 target")
+	}
+	if modelV6.getHostColumnWidth() != colHostIPv6 {
+		t.Errorf("expected column width %d for IPv6, got %d", colHostIPv6, modelV6.getHostColumnWidth())
+	}
+}
+
+func TestMTRModel_View_DisplayModeIndicator(t *testing.T) {
+	model := NewMTRModel("google.com", "8.8.8.8")
+
+	// DisplayModeHostname (default) should show [DNS]
+	view := model.View()
+	if !containsString(view, "[DNS]") {
+		t.Error("expected [DNS] indicator in view for DisplayModeHostname")
+	}
+
+	// Toggle to DisplayModeIP
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
+	newModel, _ := model.Update(msg)
+	m := newModel.(*MTRModel)
+
+	view = m.View()
+	if !containsString(view, "[IP]") {
+		t.Error("expected [IP] indicator in view for DisplayModeIP")
+	}
+
+	// Toggle to DisplayModeBoth
+	newModel, _ = m.Update(msg)
+	m = newModel.(*MTRModel)
+
+	view = m.View()
+	if !containsString(view, "[Both]") {
+		t.Error("expected [Both] indicator in view for DisplayModeBoth")
+	}
+}
+
+// containsString checks if a string contains a substring (helper for tests)
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStringHelper(s, substr))
+}
+
+func containsStringHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

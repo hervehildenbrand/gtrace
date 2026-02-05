@@ -33,21 +33,35 @@ type CycleCompleteMsg struct {
 // TickMsg is sent periodically to refresh the display.
 type TickMsg struct{}
 
+// DisplayMode controls how hosts are shown in the display.
+type DisplayMode int
+
+const (
+	// DisplayModeHostname shows hostname with IP in parentheses (default)
+	DisplayModeHostname DisplayMode = iota
+	// DisplayModeIP shows IP address with hostname in parentheses
+	DisplayModeIP
+	// DisplayModeBoth shows both (current behavior)
+	DisplayModeBoth
+)
+
 // MTRModel is the Bubbletea model for the MTR-style continuous TUI.
 type MTRModel struct {
-	mu        sync.RWMutex
-	target    string
-	targetIP  string
-	stats     map[int]*HopStats // Keyed by TTL
-	maxTTL    int               // Highest TTL seen
-	cycles    int
-	running   bool
-	paused    bool
-	interval  time.Duration
-	startTime time.Time
-	spinner   spinner.Model
-	width     int
-	height    int
+	mu          sync.RWMutex
+	target      string
+	targetIP    string
+	stats       map[int]*HopStats // Keyed by TTL
+	maxTTL      int               // Highest TTL seen
+	cycles      int
+	running     bool
+	paused      bool
+	interval    time.Duration
+	startTime   time.Time
+	spinner     spinner.Model
+	width       int
+	height      int
+	displayMode DisplayMode // Toggle between hostname/IP display
+	isIPv6      bool        // Track if target is IPv6 for column sizing
 }
 
 // NewMTRModel creates a new MTR model.
@@ -56,15 +70,20 @@ func NewMTRModel(target, targetIP string) *MTRModel {
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
+	// Check if target is IPv6 (contains colon)
+	isIPv6 := strings.Contains(targetIP, ":")
+
 	return &MTRModel{
-		target:    target,
-		targetIP:  targetIP,
-		stats:     make(map[int]*HopStats),
-		running:   true,
-		paused:    false,
-		interval:  time.Second,
-		startTime: time.Now(),
-		spinner:   s,
+		target:      target,
+		targetIP:    targetIP,
+		stats:       make(map[int]*HopStats),
+		running:     true,
+		paused:      false,
+		interval:    time.Second,
+		startTime:   time.Now(),
+		spinner:     s,
+		displayMode: DisplayModeHostname, // Default: show hostname first
+		isIPv6:      isIPv6,
 	}
 }
 
@@ -91,6 +110,11 @@ func (m *MTRModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.maxTTL = 0
 			m.cycles = 0
 			m.startTime = time.Now()
+			m.mu.Unlock()
+		case "n":
+			// Toggle display mode (like real mtr)
+			m.mu.Lock()
+			m.displayMode = (m.displayMode + 1) % 3
 			m.mu.Unlock()
 		}
 
@@ -155,16 +179,25 @@ func (m *MTRModel) handleProbeResult(msg ProbeResultMsg) {
 
 // Column widths for consistent alignment
 const (
-	colHop   = 4
-	colHost  = 40
-	colLoss  = 7
-	colSnt   = 6
-	colRecv  = 6
-	colBest  = 8
-	colAvg   = 8
-	colWrst  = 8
-	colLast  = 8
+	colHop      = 4
+	colHostIPv4 = 40 // Width for IPv4 hosts
+	colHostIPv6 = 52 // Width for IPv6 hosts (IPv6 addresses are up to 39 chars)
+	colLoss     = 7
+	colSnt      = 6
+	colRecv     = 6
+	colBest     = 8
+	colAvg      = 8
+	colWrst     = 8
+	colLast     = 8
 )
+
+// getHostColumnWidth returns the appropriate host column width.
+func (m *MTRModel) getHostColumnWidth() int {
+	if m.isIPv6 {
+		return colHostIPv6
+	}
+	return colHostIPv4
+}
 
 // View implements tea.Model.
 func (m *MTRModel) View() string {
@@ -179,6 +212,7 @@ func (m *MTRModel) View() string {
 	b.WriteString("\n\n")
 
 	// Header (mtr-style columns)
+	colHost := m.getHostColumnWidth()
 	header := fmt.Sprintf("%-*s %-*s %*s %*s %*s %*s %*s %*s %*s %s",
 		colHop, "Hop",
 		colHost, "Host",
@@ -192,7 +226,8 @@ func (m *MTRModel) View() string {
 		"Graph")
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", 110))
+	lineWidth := colHop + 1 + colHost + 1 + colLoss + 1 + colSnt + 1 + colRecv + 1 + colBest + 1 + colAvg + 1 + colWrst + 1 + colLast + 10
+	b.WriteString(strings.Repeat("─", lineWidth))
 	b.WriteString("\n")
 
 	// Hops (ordered by TTL)
@@ -204,7 +239,7 @@ func (m *MTRModel) View() string {
 
 	// Status bar
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", 110))
+	b.WriteString(strings.Repeat("─", lineWidth))
 	b.WriteString("\n")
 	b.WriteString(m.renderStatusBar())
 
@@ -217,7 +252,18 @@ func (m *MTRModel) View() string {
 		b.WriteString(m.spinner.View())
 		b.WriteString(" ")
 	}
-	b.WriteString("Press 'p' to pause/resume, 'r' to reset, 'q' to quit")
+
+	// Show display mode indicator
+	modeStr := ""
+	switch m.displayMode {
+	case DisplayModeHostname:
+		modeStr = "[DNS]"
+	case DisplayModeIP:
+		modeStr = "[IP]"
+	case DisplayModeBoth:
+		modeStr = "[Both]"
+	}
+	b.WriteString(fmt.Sprintf("%s Press 'n' to toggle DNS/IP, 'p' pause, 'r' reset, 'q' quit", modeStr))
 
 	return b.String()
 }
@@ -306,10 +352,16 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 
 // formatHostColumn formats the host column with proper padding and styling.
 // This handles ANSI codes correctly by padding plain text first.
+// Display modes:
+//   - DisplayModeHostname: hostname [ASN] (IP) - like real mtr default
+//   - DisplayModeIP: IP [ASN] (hostname)
+//   - DisplayModeBoth: IP [ASN] (hostname) - legacy behavior
 func (m *MTRModel) formatHostColumn(stats *HopStats) string {
+	colWidth := m.getHostColumnWidth()
+
 	if stats.LastIP == nil {
 		// Timeout - pad asterisk to full width
-		padded := fmt.Sprintf("%-*s", colHost, "*")
+		padded := fmt.Sprintf("%-*s", colWidth, "*")
 		return timeoutStyle.Render(padded)
 	}
 
@@ -317,27 +369,71 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 	var plainParts []string
 	var styledParts []string
 
-	// IP address
 	ipStr := stats.LastIP.String()
-	plainParts = append(plainParts, ipStr)
-	styledParts = append(styledParts, ipStyle.Render(ipStr))
+	hostname := stats.Enrichment.Hostname
 
-	// ASN
-	if stats.Enrichment.ASN > 0 {
-		asnStr := fmt.Sprintf("[AS%d]", stats.Enrichment.ASN)
-		plainParts = append(plainParts, asnStr)
-		styledParts = append(styledParts, asnStyle.Render(asnStr))
+	// Determine max hostname length based on display mode and available space
+	maxHostnameLen := 30
+	if m.isIPv6 {
+		maxHostnameLen = 35
 	}
 
-	// Hostname (truncated)
-	if stats.Enrichment.Hostname != "" {
-		hostname := stats.Enrichment.Hostname
-		if len(hostname) > 20 {
-			hostname = hostname[:17] + "..."
+	switch m.displayMode {
+	case DisplayModeHostname:
+		// Hostname first (or IP if no hostname)
+		if hostname != "" {
+			displayHost := hostname
+			if len(displayHost) > maxHostnameLen {
+				displayHost = displayHost[:maxHostnameLen-3] + "..."
+			}
+			plainParts = append(plainParts, displayHost)
+			styledParts = append(styledParts, hostnameStyle.Render(displayHost))
+		} else {
+			plainParts = append(plainParts, ipStr)
+			styledParts = append(styledParts, ipStyle.Render(ipStr))
 		}
-		hostStr := "(" + hostname + ")"
-		plainParts = append(plainParts, hostStr)
-		styledParts = append(styledParts, hostnameStyle.Render(hostStr))
+
+		// ASN
+		if stats.Enrichment.ASN > 0 {
+			asnStr := fmt.Sprintf("[AS%d]", stats.Enrichment.ASN)
+			plainParts = append(plainParts, asnStr)
+			styledParts = append(styledParts, asnStyle.Render(asnStr))
+		}
+
+	case DisplayModeIP:
+		// IP address first
+		plainParts = append(plainParts, ipStr)
+		styledParts = append(styledParts, ipStyle.Render(ipStr))
+
+		// ASN
+		if stats.Enrichment.ASN > 0 {
+			asnStr := fmt.Sprintf("[AS%d]", stats.Enrichment.ASN)
+			plainParts = append(plainParts, asnStr)
+			styledParts = append(styledParts, asnStyle.Render(asnStr))
+		}
+
+	case DisplayModeBoth:
+		// IP address
+		plainParts = append(plainParts, ipStr)
+		styledParts = append(styledParts, ipStyle.Render(ipStr))
+
+		// ASN
+		if stats.Enrichment.ASN > 0 {
+			asnStr := fmt.Sprintf("[AS%d]", stats.Enrichment.ASN)
+			plainParts = append(plainParts, asnStr)
+			styledParts = append(styledParts, asnStyle.Render(asnStr))
+		}
+
+		// Hostname in parentheses (truncated)
+		if hostname != "" {
+			displayHost := hostname
+			if len(displayHost) > 20 {
+				displayHost = displayHost[:17] + "..."
+			}
+			hostStr := "(" + displayHost + ")"
+			plainParts = append(plainParts, hostStr)
+			styledParts = append(styledParts, hostnameStyle.Render(hostStr))
+		}
 	}
 
 	// Calculate plain text length (with spaces between parts)
@@ -345,15 +441,15 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 	plainLen := len(plainText)
 
 	// Truncate if too long
-	if plainLen > colHost {
+	if plainLen > colWidth {
 		// Rebuild with truncation
-		truncated := plainText[:colHost-3] + "..."
+		truncated := plainText[:colWidth-3] + "..."
 		return hopStyle.Render(truncated)
 	}
 
 	// Build styled output with padding
 	styled := strings.Join(styledParts, " ")
-	padding := colHost - plainLen
+	padding := colWidth - plainLen
 	if padding > 0 {
 		styled += strings.Repeat(" ", padding)
 	}

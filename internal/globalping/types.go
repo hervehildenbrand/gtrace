@@ -70,9 +70,10 @@ func ParseLocationStrings(s string) []Location {
 
 // MeasurementOptions contains options for the measurement.
 type MeasurementOptions struct {
-	Protocol string `json:"protocol,omitempty"` // icmp, tcp, udp
-	Port     int    `json:"port,omitempty"`     // Destination port
-	Packets  int    `json:"packets,omitempty"`  // Number of packets
+	Protocol  string `json:"protocol,omitempty"`  // icmp, tcp, udp
+	Port      int    `json:"port,omitempty"`      // Destination port
+	Packets   int    `json:"packets,omitempty"`   // Number of packets
+	IPVersion int    `json:"ipVersion,omitempty"` // IP version: 4 or 6 (default: auto)
 }
 
 // MeasurementRequest represents a request to create a measurement.

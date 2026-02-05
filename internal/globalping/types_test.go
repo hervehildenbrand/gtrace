@@ -254,3 +254,35 @@ func TestMTRStats_LossPercent(t *testing.T) {
 		t.Errorf("expected Loss 10.0%%, got %.1f%%", stats.Loss)
 	}
 }
+
+func TestMeasurementOptions_IPVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		options  MeasurementOptions
+		expected int
+	}{
+		{
+			name:     "default is 0 (not set)",
+			options:  MeasurementOptions{},
+			expected: 0,
+		},
+		{
+			name:     "IPv4",
+			options:  MeasurementOptions{IPVersion: 4},
+			expected: 4,
+		},
+		{
+			name:     "IPv6",
+			options:  MeasurementOptions{IPVersion: 6},
+			expected: 6,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.options.IPVersion != tt.expected {
+				t.Errorf("expected IPVersion %d, got %d", tt.expected, tt.options.IPVersion)
+			}
+		})
+	}
+}
