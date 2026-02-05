@@ -30,7 +30,6 @@ NOTES.md
 .env
 .env.*
 
-# Demo outputs (keep .tape scripts, ignore generated media)
-demo/*.gif
+# Demo outputs (keep .tape scripts and GIFs, ignore video files)
 demo/*.mp4
 demo/*.webm
