@@ -91,8 +91,23 @@ func (r *CompareRenderer) formatHopColumn(tr *hop.TraceResult, index int) string
 		return fmt.Sprintf("%2d  * * *", ttl)
 	}
 
+	// Use hostname if available, otherwise IP
+	host := ip.String()
+	if h.Enrichment.Hostname != "" {
+		host = r.truncateHost(h.Enrichment.Hostname)
+	}
+
 	rtt := r.formatRTT(h.AvgRTT())
-	return fmt.Sprintf("%2d  %-18s  %s", ttl, ip.String(), rtt)
+	return fmt.Sprintf("%2d  %-18s  %s", ttl, host, rtt)
+}
+
+// truncateHost truncates a hostname to fit in the column.
+func (r *CompareRenderer) truncateHost(host string) string {
+	const maxLen = 18
+	if len(host) <= maxLen {
+		return host
+	}
+	return host[:maxLen-3] + "..."
 }
 
 // formatRTT formats a duration as milliseconds.
