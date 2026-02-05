@@ -11,6 +11,7 @@ import (
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 // ICMPTracer implements traceroute using ICMP Echo Request.
@@ -28,13 +29,16 @@ func NewICMPTracer(cfg *Config) *ICMPTracer {
 }
 
 // Trace performs an ICMP traceroute to the target IP.
+// Supports both IPv4 and IPv6 targets.
 func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallback) (*hop.TraceResult, error) {
 	result := hop.NewTraceResult(target.String(), target.String())
 	result.Protocol = string(ProtocolICMP)
 	result.StartTime = time.Now()
 
-	// Open ICMP connection
-	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+	// Open ICMP connection based on IP version
+	proto := ICMPProtocol(target)
+	listenAddr := ListenAddress(target)
+	conn, err := icmp.ListenPacket(proto, listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open ICMP socket: %w (try running with sudo)", err)
 	}
@@ -97,14 +101,23 @@ type probeResult struct {
 }
 
 // sendProbe sends a single ICMP probe and waits for response.
+// Supports both IPv4 and IPv6 targets.
 func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
-	// Set TTL for this probe
-	if err := conn.IPv4PacketConn().SetTTL(ttl); err != nil {
-		return nil, fmt.Errorf("failed to set TTL: %w", err)
+	isV6 := IsIPv6(target)
+
+	// Set TTL/Hop Limit for this probe
+	if isV6 {
+		if err := conn.IPv6PacketConn().SetHopLimit(ttl); err != nil {
+			return nil, fmt.Errorf("failed to set hop limit: %w", err)
+		}
+	} else {
+		if err := conn.IPv4PacketConn().SetTTL(ttl); err != nil {
+			return nil, fmt.Errorf("failed to set TTL: %w", err)
+		}
 	}
 
 	// Build and send ICMP Echo Request
-	msg := t.buildEchoRequest(ttl, seq)
+	msg := t.buildEchoRequestForIP(ttl, seq, target)
 	msgBytes, err := msg.Marshal(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal ICMP message: %w", err)
@@ -123,6 +136,11 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
+	// Protocol number for parsing ICMP messages
+	protoNum := ICMPProtocolNum(target)
+	// IP header size for extracting original packet info
+	ipHdrSize := IPHeaderSize(target)
+
 	// Wait for response
 	reply := make([]byte, 1500)
 	for {
@@ -135,34 +153,34 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 		rtt := t.calculateRTT(start, end)
 
 		// Parse the response
-		rm, err := icmp.ParseMessage(1, reply[:n]) // 1 = ICMP for IPv4
+		rm, err := icmp.ParseMessage(protoNum, reply[:n])
 		if err != nil {
 			continue // Ignore malformed packets
 		}
 
 		peerIP := peer.(*net.IPAddr).IP
 
-		switch rm.Type {
-		case ipv4.ICMPTypeEchoReply:
-			// Check if this is our reply
+		// Check for Echo Reply (target reached)
+		if isEchoReply(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.Echo); ok {
 				if body.ID == t.id {
 					return &probeResult{IP: peerIP, RTT: rtt}, nil
 				}
 			}
+		}
 
-		case ipv4.ICMPTypeTimeExceeded:
-			// Extract original packet from Time Exceeded message
+		// Check for Time Exceeded (intermediate hop)
+		if isTimeExceeded(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.TimeExceeded); ok {
 				// The Data field contains the original IP header + first 8 bytes of payload
-				if len(body.Data) >= 28 {
-					// Check if this response is for our probe
-					// Original ICMP header starts at offset 20 (after IP header)
-					origID := int(body.Data[24])<<8 | int(body.Data[25])
+				// For IPv4: 20 byte header + 8 bytes = 28 minimum
+				// For IPv6: 40 byte header + 8 bytes = 48 minimum
+				minLen := ipHdrSize + 8
+				if len(body.Data) >= minLen {
+					// Original ICMP ID is at offset ipHdrSize+4 and ipHdrSize+5
+					origID := int(body.Data[ipHdrSize+4])<<8 | int(body.Data[ipHdrSize+5])
 					if origID == t.id {
 						// Extract MPLS labels from the raw ICMP data
-						// The reply contains ICMP header (8 bytes) + body
-						// MPLS extensions are in the body after the original datagram
 						var mplsLabels []hop.MPLSLabel
 						if n > 8 {
 							mplsLabels = ExtractMPLSFromICMP(reply[8:n])
@@ -171,13 +189,14 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 					}
 				}
 			}
+		}
 
-		case ipv4.ICMPTypeDestinationUnreachable:
-			// Destination unreachable - target reached but port/protocol unreachable
+		// Check for Destination Unreachable
+		if isDestUnreachable(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
-				// Validate this is our probe by checking the original ICMP ID
-				if len(body.Data) >= 28 {
-					origID := int(body.Data[24])<<8 | int(body.Data[25])
+				minLen := ipHdrSize + 8
+				if len(body.Data) >= minLen {
+					origID := int(body.Data[ipHdrSize+4])<<8 | int(body.Data[ipHdrSize+5])
 					if origID == t.id {
 						return &probeResult{IP: peerIP, RTT: rtt}, nil
 					}
@@ -192,10 +211,30 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 	}
 }
 
-// buildEchoRequest creates an ICMP Echo Request message.
+// buildEchoRequest creates an ICMP Echo Request message (IPv4 only, for backward compatibility).
 func (t *ICMPTracer) buildEchoRequest(ttl, seq int) *icmp.Message {
 	return &icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
+		Code: 0,
+		Body: &icmp.Echo{
+			ID:   t.id,
+			Seq:  seq,
+			Data: []byte(fmt.Sprintf("gtr-%d-%d-%d", time.Now().UnixNano(), ttl, seq)),
+		},
+	}
+}
+
+// buildEchoRequestForIP creates an ICMP Echo Request message for the given IP version.
+func (t *ICMPTracer) buildEchoRequestForIP(ttl, seq int, target net.IP) *icmp.Message {
+	var msgType icmp.Type
+	if IsIPv6(target) {
+		msgType = ipv6.ICMPTypeEchoRequest
+	} else {
+		msgType = ipv4.ICMPTypeEcho
+	}
+
+	return &icmp.Message{
+		Type: msgType,
 		Code: 0,
 		Body: &icmp.Echo{
 			ID:   t.id,
@@ -210,9 +249,14 @@ func (t *ICMPTracer) calculateRTT(start, end time.Time) time.Duration {
 	return end.Sub(start)
 }
 
-// isTargetReached checks if the ICMP type indicates target reached.
+// isTargetReached checks if the ICMP type indicates target reached (IPv4 only, for backward compatibility).
 func (t *ICMPTracer) isTargetReached(msgType icmp.Type) bool {
 	return msgType == ipv4.ICMPTypeEchoReply
+}
+
+// isTargetReachedForIP checks if the ICMP type indicates target reached for the given IP version.
+func (t *ICMPTracer) isTargetReachedForIP(msgType icmp.Type, target net.IP) bool {
+	return isEchoReply(msgType, target)
 }
 
 // getICMPID returns the ICMP identifier for this tracer.
@@ -227,4 +271,28 @@ func isTimeout(err error) bool {
 	}
 	netErr, ok := err.(net.Error)
 	return ok && netErr.Timeout()
+}
+
+// isTimeExceeded checks if the ICMP type is Time Exceeded for the given IP version.
+func isTimeExceeded(msgType icmp.Type, target net.IP) bool {
+	if IsIPv6(target) {
+		return msgType == ipv6.ICMPTypeTimeExceeded
+	}
+	return msgType == ipv4.ICMPTypeTimeExceeded
+}
+
+// isEchoReply checks if the ICMP type is Echo Reply for the given IP version.
+func isEchoReply(msgType icmp.Type, target net.IP) bool {
+	if IsIPv6(target) {
+		return msgType == ipv6.ICMPTypeEchoReply
+	}
+	return msgType == ipv4.ICMPTypeEchoReply
+}
+
+// isDestUnreachable checks if the ICMP type is Destination Unreachable for the given IP version.
+func isDestUnreachable(msgType icmp.Type, target net.IP) bool {
+	if IsIPv6(target) {
+		return msgType == ipv6.ICMPTypeDestinationUnreachable
+	}
+	return msgType == ipv4.ICMPTypeDestinationUnreachable
 }
