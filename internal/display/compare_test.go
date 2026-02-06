@@ -187,6 +187,112 @@ func TestCompareRenderer_Render_NoColor(t *testing.T) {
 	}
 }
 
+func TestCompareRenderer_RenderAll_MultipleRemotes(t *testing.T) {
+	local := createTestTraceResult("8.8.8.8", true, []testHop{
+		{ttl: 1, ip: "192.168.1.1", rtt: 500 * time.Microsecond},
+		{ttl: 2, ip: "8.8.8.8", rtt: 2000 * time.Microsecond},
+	})
+	local.Source = "Local"
+
+	remoteNY := createTestTraceResult("8.8.8.8", true, []testHop{
+		{ttl: 1, ip: "10.0.0.1", rtt: 300 * time.Microsecond},
+		{ttl: 2, ip: "8.8.8.8", rtt: 1500 * time.Microsecond},
+	})
+	remoteNY.Source = "New York, US, Comcast"
+
+	remoteLon := createTestTraceResult("8.8.8.8", true, []testHop{
+		{ttl: 1, ip: "51.89.217.252", rtt: 400 * time.Microsecond},
+		{ttl: 2, ip: "8.8.8.8", rtt: 300 * time.Microsecond},
+	})
+	remoteLon.Source = "London, GB, OVH SAS"
+
+	var buf bytes.Buffer
+	renderer := NewCompareRenderer(&buf, false)
+	err := renderer.RenderAll(local, []*hop.TraceResult{remoteNY, remoteLon})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Both remotes should appear in output
+	if !strings.Contains(output, "10.0.0.1") {
+		t.Error("output should contain New York hop IP")
+	}
+	if !strings.Contains(output, "51.89.217.252") {
+		t.Error("output should contain London hop IP")
+	}
+
+	// Separator should appear between comparisons
+	if !strings.Contains(output, "===") {
+		t.Error("output should contain === separator between comparisons")
+	}
+}
+
+func TestCompareRenderer_RenderAll_SingleRemote_NoSeparator(t *testing.T) {
+	local := createTestTraceResult("8.8.8.8", true, []testHop{
+		{ttl: 1, ip: "192.168.1.1", rtt: 500 * time.Microsecond},
+		{ttl: 2, ip: "8.8.8.8", rtt: 2000 * time.Microsecond},
+	})
+	local.Source = "Local"
+
+	remote := createTestTraceResult("8.8.8.8", true, []testHop{
+		{ttl: 1, ip: "51.89.217.252", rtt: 400 * time.Microsecond},
+		{ttl: 2, ip: "8.8.8.8", rtt: 300 * time.Microsecond},
+	})
+	remote.Source = "London, GB, OVH SAS"
+
+	var buf bytes.Buffer
+	renderer := NewCompareRenderer(&buf, false)
+	err := renderer.RenderAll(local, []*hop.TraceResult{remote})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should show the comparison
+	if !strings.Contains(output, "51.89.217.252") {
+		t.Error("output should contain remote hop IP")
+	}
+
+	// Should NOT have separator for single remote
+	if strings.Contains(output, "===") {
+		t.Error("output should not contain === separator for single remote")
+	}
+}
+
+func TestCompareRenderer_RenderAll_UsesRemoteSource(t *testing.T) {
+	local := createTestTraceResult("8.8.8.8", true, []testHop{
+		{ttl: 1, ip: "192.168.1.1", rtt: 500 * time.Microsecond},
+		{ttl: 2, ip: "8.8.8.8", rtt: 2000 * time.Microsecond},
+	})
+	local.Source = "Local"
+
+	remote := createTestTraceResult("8.8.8.8", true, []testHop{
+		{ttl: 1, ip: "51.89.217.252", rtt: 400 * time.Microsecond},
+		{ttl: 2, ip: "8.8.8.8", rtt: 300 * time.Microsecond},
+	})
+	remote.Source = "London, GB, OVH SAS"
+
+	var buf bytes.Buffer
+	renderer := NewCompareRenderer(&buf, false)
+	err := renderer.RenderAll(local, []*hop.TraceResult{remote})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should use remote.Source (from formatProbeLocation) as column header
+	if !strings.Contains(output, "London, GB, OVH SAS") {
+		t.Error("output should contain remote source location 'London, GB, OVH SAS' in header")
+	}
+}
+
 // Helper types and functions
 
 type testHop struct {
