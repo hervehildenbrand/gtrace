@@ -63,6 +63,21 @@ func (r *CompareRenderer) Render(local, remote *hop.TraceResult, remoteLocation 
 	return nil
 }
 
+// RenderAll displays local vs each remote trace, with separators between multiple comparisons.
+func (r *CompareRenderer) RenderAll(local *hop.TraceResult, remotes []*hop.TraceResult) error {
+	for i, remote := range remotes {
+		if i > 0 {
+			fmt.Fprintln(r.writer)
+			fmt.Fprintln(r.writer, "===")
+			fmt.Fprintln(r.writer)
+		}
+		if err := r.Render(local, remote, remote.Source); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // formatHopColumn formats a single hop for one column.
 func (r *CompareRenderer) formatHopColumn(tr *hop.TraceResult, index int) string {
 	if index >= len(tr.Hops) {
