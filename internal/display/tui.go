@@ -341,6 +341,9 @@ func (m *TUIModel) renderStatusBar() string {
 	if info.HasECMP {
 		parts = append(parts, asnStyle.Render("ECMP"))
 	}
+	if info.HasNAT {
+		parts = append(parts, timeoutStyle.Render("NAT"))
+	}
 
 	elapsed := time.Since(m.startTime).Round(time.Millisecond)
 	parts = append(parts, fmt.Sprintf("Time: %v", elapsed))

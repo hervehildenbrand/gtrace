@@ -66,7 +66,11 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 				continue
 			}
 
-			h.AddProbe(pr.IP, pr.RTT)
+			if t.config.DetectNAT && pr.ResponseTTL > 0 {
+				h.AddProbeWithTTL(pr.IP, pr.RTT, pr.ResponseTTL)
+			} else {
+				h.AddProbe(pr.IP, pr.RTT)
+			}
 
 			// Set MPLS labels if discovered (first probe with labels wins)
 			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
@@ -75,6 +79,19 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 
 			if pr.IP.Equal(target) {
 				reached = true
+			}
+		}
+
+		// NAT detection via TTL analysis
+		if t.config.DetectNAT {
+			for _, p := range h.Probes {
+				if !p.Timeout && p.ResponseTTL > 0 {
+					expectedTTL := 64 - ttl // Assume common Linux/macOS default
+					if DetectNATFromTTL(expectedTTL, p.ResponseTTL) {
+						h.NAT = true
+						break
+					}
+				}
 			}
 		}
 
@@ -95,9 +112,11 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 
 // probeResult holds the result of a single probe including MPLS labels.
 type probeResult struct {
-	IP   net.IP
-	RTT  time.Duration
-	MPLS []hop.MPLSLabel
+	IP          net.IP
+	RTT         time.Duration
+	MPLS        []hop.MPLSLabel
+	ResponseTTL int // TTL from response packet (for NAT detection)
+	MTU         int // Discovered MTU from Fragmentation Needed
 }
 
 // sendProbe sends a single ICMP probe and waits for response.
@@ -141,10 +160,27 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 	// IP header size for extracting original packet info
 	ipHdrSize := IPHeaderSize(target)
 
+	// Enable TTL control messages for NAT detection (IPv4 only)
+	if !isV6 && t.config.DetectNAT {
+		_ = conn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
+	}
+
 	// Wait for response
 	reply := make([]byte, 1500)
 	for {
-		n, peer, err := conn.ReadFrom(reply)
+		var n int
+		var peer net.Addr
+		var responseTTL int
+
+		if !isV6 && t.config.DetectNAT {
+			var cm *ipv4.ControlMessage
+			n, cm, peer, err = conn.IPv4PacketConn().ReadFrom(reply)
+			if cm != nil {
+				responseTTL = cm.TTL
+			}
+		} else {
+			n, peer, err = conn.ReadFrom(reply)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +200,7 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 		if isEchoReply(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.Echo); ok {
 				if body.ID == t.id {
-					return &probeResult{IP: peerIP, RTT: rtt}, nil
+					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL}, nil
 				}
 			}
 		}
@@ -185,7 +221,7 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 						if n > 8 {
 							mplsLabels = ExtractMPLSFromICMP(reply[8:n])
 						}
-						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels}, nil
+						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL}, nil
 					}
 				}
 			}
@@ -198,7 +234,7 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 				if len(body.Data) >= minLen {
 					origID := int(body.Data[ipHdrSize+4])<<8 | int(body.Data[ipHdrSize+5])
 					if origID == t.id {
-						return &probeResult{IP: peerIP, RTT: rtt}, nil
+						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL}, nil
 					}
 				}
 			}
