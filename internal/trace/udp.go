@@ -54,7 +54,12 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 		h := hop.NewHop(ttl)
 		reached := false
 
-		for i := 0; i < t.config.PacketsPerHop; i++ {
+		probeCount := t.config.PacketsPerHop
+		if t.config.ECMPFlows > 0 {
+			probeCount = t.config.ECMPFlows
+		}
+
+		for i := 0; i < probeCount; i++ {
 			probeNum++
 			pr, err := t.sendProbe(icmpConn, target, ttl, probeNum)
 			if err != nil {
@@ -220,7 +225,11 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 }
 
 // getPort returns the UDP destination port for a given sequence number.
+// When ECMP flows are enabled, uses GenerateFlowID for port diversity.
 func (t *UDPTracer) getPort(seq int) int {
+	if t.config.ECMPFlows > 0 {
+		return int(GenerateFlowID(seq))
+	}
 	return t.config.Port + seq - 1
 }
 
