@@ -54,8 +54,18 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 		h := hop.NewHop(ttl)
 		reached := false
 
-		for i := 0; i < t.config.PacketsPerHop; i++ {
-			pr, err := t.sendProbe(conn, target, ttl, i)
+		// When ECMP flows are enabled, use them as probe count with flow IDs
+		probeCount := t.config.PacketsPerHop
+		if t.config.ECMPFlows > 0 {
+			probeCount = t.config.ECMPFlows
+		}
+
+		for i := 0; i < probeCount; i++ {
+			flowID := 0
+			if t.config.ECMPFlows > 0 {
+				flowID = i + 1
+			}
+			pr, err := t.sendProbe(conn, target, ttl, i, flowID)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
 					h.AddTimeout()
@@ -120,8 +130,8 @@ type probeResult struct {
 }
 
 // sendProbe sends a single ICMP probe and waits for response.
-// Supports both IPv4 and IPv6 targets.
-func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
+// Supports both IPv4 and IPv6 targets. flowID > 0 varies the payload for ECMP diversity.
+func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, flowID int) (*probeResult, error) {
 	isV6 := IsIPv6(target)
 
 	// Set TTL/Hop Limit for this probe
@@ -136,7 +146,7 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq in
 	}
 
 	// Build and send ICMP Echo Request
-	msg := t.buildEchoRequestForIP(ttl, seq, target)
+	msg := t.buildEchoRequestForIP(ttl, seq, target, flowID)
 	msgBytes, err := msg.Marshal(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal ICMP message: %w", err)
@@ -261,12 +271,33 @@ func (t *ICMPTracer) buildEchoRequest(ttl, seq int) *icmp.Message {
 }
 
 // buildEchoRequestForIP creates an ICMP Echo Request message for the given IP version.
-func (t *ICMPTracer) buildEchoRequestForIP(ttl, seq int, target net.IP) *icmp.Message {
+// When flowID > 0, extra bytes are appended to vary the ICMP checksum for ECMP path diversity.
+func (t *ICMPTracer) buildEchoRequestForIP(ttl, seq int, target net.IP, flowID int) *icmp.Message {
 	var msgType icmp.Type
 	if IsIPv6(target) {
 		msgType = ipv6.ICMPTypeEchoRequest
 	} else {
 		msgType = ipv4.ICMPTypeEcho
+	}
+
+	payload := []byte(fmt.Sprintf("gtr-%d-%d-%d", time.Now().UnixNano(), ttl, seq))
+	if flowID > 0 {
+		// Append flow-specific bytes to vary ICMP checksum for ECMP
+		flowBytes := make([]byte, 4)
+		flowBytes[0] = byte(flowID >> 24)
+		flowBytes[1] = byte(flowID >> 16)
+		flowBytes[2] = byte(flowID >> 8)
+		flowBytes[3] = byte(flowID)
+		payload = append(payload, flowBytes...)
+	}
+
+	// Pad payload to reach desired probe size
+	if t.config.ProbeSize > 0 {
+		currentSize := len(payload) + 8 // ICMP header is 8 bytes
+		if t.config.ProbeSize > currentSize {
+			padding := make([]byte, t.config.ProbeSize-currentSize)
+			payload = append(payload, padding...)
+		}
 	}
 
 	return &icmp.Message{
@@ -275,7 +306,7 @@ func (t *ICMPTracer) buildEchoRequestForIP(ttl, seq int, target net.IP) *icmp.Me
 		Body: &icmp.Echo{
 			ID:   t.id,
 			Seq:  seq,
-			Data: []byte(fmt.Sprintf("gtr-%d-%d-%d", time.Now().UnixNano(), ttl, seq)),
+			Data: payload,
 		},
 	}
 }
