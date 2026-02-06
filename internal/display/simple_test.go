@@ -183,6 +183,21 @@ func TestSimpleRenderer_RenderHop_ShowsMTU(t *testing.T) {
 	}
 }
 
+func TestSimpleRenderer_RenderHop_ShowsMTU_AllTimeouts(t *testing.T) {
+	r := NewSimpleRenderer()
+	h := hop.NewHop(1)
+	h.AddTimeout()
+	h.AddTimeout()
+	h.AddTimeout()
+	h.MTU = 1500
+
+	result := r.RenderHop(h)
+
+	if !strings.Contains(result, "[MTU:1500]") {
+		t.Errorf("expected [MTU:1500] on all-timeout hop, got %q", result)
+	}
+}
+
 func TestSimpleRenderer_FormatRTT_FormatsMilliseconds(t *testing.T) {
 	r := NewSimpleRenderer()
 

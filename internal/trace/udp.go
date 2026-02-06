@@ -71,6 +71,17 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
+			// Set MTU if discovered (may come from EMSGSIZE with nil IP)
+			if pr.MTU > 0 && h.MTU == 0 {
+				h.MTU = pr.MTU
+			}
+
+			// EMSGSIZE returns nil IP - record as timeout
+			if pr.IP == nil {
+				h.AddTimeout()
+				continue
+			}
+
 			if t.config.DetectNAT && pr.ResponseTTL > 0 {
 				h.AddProbeWithTTL(pr.IP, pr.RTT, pr.ResponseTTL)
 			} else {
@@ -80,11 +91,6 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 			// Set MPLS labels if discovered (first probe with labels wins)
 			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
 				h.SetMPLS(pr.MPLS)
-			}
-
-			// Set MTU if discovered
-			if pr.MTU > 0 && h.MTU == 0 {
-				h.MTU = pr.MTU
 			}
 
 			if pr.IP.Equal(target) {
@@ -140,6 +146,13 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
 	}
 
+	// Set Don't Fragment bit for MTU discovery (IPv4 only)
+	if t.config.DiscoverMTU && !IsIPv6(target) {
+		if err := setDontFragment(fd); err != nil {
+			return nil, fmt.Errorf("failed to set DF bit: %w", err)
+		}
+	}
+
 	// Build destination address
 	sa := buildSockaddr(target, port)
 
@@ -150,6 +163,10 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 
 	// Send UDP packet
 	if err := sendToSocket(fd, payload, 0, sa); err != nil {
+		// EMSGSIZE means packet exceeds local interface MTU with DF bit set
+		if t.config.DiscoverMTU && isEMSGSIZE(err) {
+			return &probeResult{MTU: StandardMTU}, nil
+		}
 		return nil, fmt.Errorf("failed to send UDP: %w", err)
 	}
 
@@ -248,8 +265,19 @@ func (t *UDPTracer) getPort(seq int) int {
 
 // buildPayload creates the UDP payload.
 func (t *UDPTracer) buildPayload(ttl, seq int) []byte {
-	// Standard traceroute payload size
-	return []byte(fmt.Sprintf("gtr-%d-%d-%d", time.Now().UnixNano(), ttl, seq))
+	payload := []byte(fmt.Sprintf("gtr-%d-%d-%d", time.Now().UnixNano(), ttl, seq))
+
+	// Pad payload to reach desired probe size (minus IP+UDP header overhead)
+	if t.config.ProbeSize > 0 {
+		overhead := 28 // 20 bytes IP header + 8 bytes UDP header
+		targetPayload := t.config.ProbeSize - overhead
+		if targetPayload > len(payload) {
+			padding := make([]byte, targetPayload-len(payload))
+			payload = append(payload, padding...)
+		}
+	}
+
+	return payload
 }
 
 // getUDPID returns the identifier for this tracer.
