@@ -84,6 +84,15 @@ func getSocketError(fd socketFD) (int, error) {
 	return val, nil
 }
 
+// isEMSGSIZE checks if an error is EMSGSIZE (message too long).
+// On Windows, this maps to WSAEMSGSIZE (10040).
+func isEMSGSIZE(err error) bool {
+	if err == nil {
+		return false
+	}
+	return err == syscall.EMSGSIZE
+}
+
 // setDontFragment sets the Don't Fragment (DF) bit on an IPv4 socket.
 // On Windows this uses IP_DONTFRAGMENT (14).
 func setDontFragment(fd socketFD) error {

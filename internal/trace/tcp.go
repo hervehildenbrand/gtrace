@@ -133,6 +133,13 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
 	}
 
+	// Set Don't Fragment bit for MTU discovery (IPv4 only)
+	if t.config.DiscoverMTU && !IsIPv6(target) {
+		if err := setDontFragment(fd); err != nil {
+			return nil, fmt.Errorf("failed to set DF bit: %w", err)
+		}
+	}
+
 	// Set non-blocking
 	if err := setSocketNonBlocking(fd); err != nil {
 		return nil, fmt.Errorf("failed to set non-blocking: %w", err)

@@ -337,6 +337,43 @@ func TestMTRModel_View_DisplayModeIndicator(t *testing.T) {
 	}
 }
 
+func TestMTRModel_View_StdDevColumn(t *testing.T) {
+	model := NewMTRModel("google.com", "8.8.8.8")
+	ip := net.ParseIP("192.168.1.1")
+
+	// Add varied RTT probes to generate non-zero StdDev
+	var m tea.Model = model
+	rtts := []time.Duration{
+		10 * time.Millisecond,
+		20 * time.Millisecond,
+		30 * time.Millisecond,
+		15 * time.Millisecond,
+		25 * time.Millisecond,
+	}
+	for _, rtt := range rtts {
+		msg := ProbeResultMsg{TTL: 1, IP: ip, RTT: rtt}
+		m, _ = m.Update(msg)
+	}
+
+	mtr := m.(*MTRModel)
+	view := mtr.View()
+
+	// Verify the header contains the StDev column
+	if !containsString(view, "StDev") {
+		t.Error("expected 'StDev' column header in MTR view")
+	}
+
+	// Verify the stats row contains a non-zero StdDev value
+	stats := mtr.stats[1]
+	if stats == nil {
+		t.Fatal("expected stats for TTL 1")
+	}
+	stdDev := stats.StdDev()
+	if stdDev == 0 {
+		t.Error("expected non-zero StdDev for varied RTTs")
+	}
+}
+
 // containsString checks if a string contains a substring (helper for tests)
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStringHelper(s, substr))
