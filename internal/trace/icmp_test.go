@@ -241,6 +241,35 @@ func TestBuildEchoRequest_NoFlowID_Consistent(t *testing.T) {
 	}
 }
 
+func TestICMPTracer_DiscoverMTU_ConfigPassthrough(t *testing.T) {
+	cfg := &Config{DiscoverMTU: true, ProbeSize: 1400}
+	tracer := NewICMPTracer(cfg)
+
+	if !tracer.config.DiscoverMTU {
+		t.Error("DiscoverMTU not passed through to tracer config")
+	}
+	if tracer.config.ProbeSize != 1400 {
+		t.Errorf("ProbeSize = %d, want 1400", tracer.config.ProbeSize)
+	}
+}
+
+func TestICMPTracer_BuildEchoRequest_ProbeSize(t *testing.T) {
+	cfg := &Config{ProbeSize: 100}
+	tracer := NewICMPTracer(cfg)
+	target := net.ParseIP("8.8.8.8")
+
+	msg := tracer.buildEchoRequestForIP(1, 0, target, 0)
+	data, err := msg.Marshal(nil)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	// Total ICMP packet should be at least ProbeSize bytes
+	if len(data) < 100 {
+		t.Errorf("packet size = %d, want >= 100", len(data))
+	}
+}
+
 func TestICMPTracer_IsDestUnreachable_IPv6(t *testing.T) {
 	target := net.ParseIP("2001:4860:4860::8888")
 

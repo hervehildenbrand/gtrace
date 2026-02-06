@@ -87,6 +87,11 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 				h.SetMPLS(pr.MPLS)
 			}
 
+			// Set MTU if discovered
+			if pr.MTU > 0 && h.MTU == 0 {
+				h.MTU = pr.MTU
+			}
+
 			if pr.IP.Equal(target) {
 				reached = true
 			}
@@ -244,7 +249,16 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 				if len(body.Data) >= minLen {
 					origID := int(body.Data[ipHdrSize+4])<<8 | int(body.Data[ipHdrSize+5])
 					if origID == t.id {
-						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL}, nil
+						// Check for Fragmentation Needed (Code 4) with MTU discovery
+						var mtu int
+						if rm.Code == 4 && t.config.DiscoverMTU && n >= 8 {
+							// Next-Hop MTU is in bytes 6-7 of raw ICMP message
+							mtu = int(reply[6])<<8 | int(reply[7])
+							if mtu < MinMTU {
+								mtu = 0
+							}
+						}
+						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu}, nil
 					}
 				}
 			}

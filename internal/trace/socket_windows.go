@@ -84,6 +84,12 @@ func getSocketError(fd socketFD) (int, error) {
 	return val, nil
 }
 
+// setDontFragment sets the Don't Fragment (DF) bit on an IPv4 socket.
+// On Windows this uses IP_DONTFRAGMENT (14).
+func setDontFragment(fd socketFD) error {
+	return syscall.SetsockoptInt(syscall.Handle(fd), syscall.IPPROTO_IP, 14, 1)
+}
+
 // socketFDInt returns the underlying integer file descriptor (for WSAPoll).
 // On Windows, this returns the handle as an int for compatibility.
 func socketFDInt(fd socketFD) int {
