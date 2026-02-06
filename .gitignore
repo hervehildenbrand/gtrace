@@ -30,6 +30,10 @@ NOTES.md
 .env
 .env.*
 
+# Test scripts and results (local)
+scripts/
+test-results/
+
 # Demo outputs (keep .tape scripts and GIFs, ignore video files)
 demo/*.mp4
 demo/*.webm
