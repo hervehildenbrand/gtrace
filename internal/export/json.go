@@ -23,17 +23,19 @@ type ExportedTrace struct {
 
 // ExportedHop is the JSON representation of a single hop.
 type ExportedHop struct {
-	TTL        int              `json:"ttl"`
-	IP         string           `json:"ip,omitempty"`
-	Hostname   string           `json:"hostname,omitempty"`
-	ASN        uint32           `json:"asn,omitempty"`
-	ASOrg      string           `json:"asOrg,omitempty"`
-	Country    string           `json:"country,omitempty"`
-	City       string           `json:"city,omitempty"`
-	Probes     []ExportedProbe  `json:"probes"`
-	MPLS       []ExportedMPLS   `json:"mpls,omitempty"`
-	AvgRTT     float64          `json:"avgRtt"`     // in ms
+	TTL         int             `json:"ttl"`
+	IP          string          `json:"ip,omitempty"`
+	Hostname    string          `json:"hostname,omitempty"`
+	ASN         uint32          `json:"asn,omitempty"`
+	ASOrg       string          `json:"asOrg,omitempty"`
+	Country     string          `json:"country,omitempty"`
+	City        string          `json:"city,omitempty"`
+	Probes      []ExportedProbe `json:"probes"`
+	MPLS        []ExportedMPLS  `json:"mpls,omitempty"`
+	AvgRTT      float64         `json:"avgRtt"`     // in ms
 	LossPercent float64         `json:"lossPercent"`
+	NAT         bool            `json:"nat,omitempty"`
+	MTU         int             `json:"mtu,omitempty"`
 }
 
 // ExportedProbe is the JSON representation of a single probe.
@@ -113,6 +115,8 @@ func (e *JSONExporter) convertHop(h *hop.Hop) ExportedHop {
 		Probes:      make([]ExportedProbe, 0, len(h.Probes)),
 		AvgRTT:      float64(h.AvgRTT()) / float64(time.Millisecond),
 		LossPercent: h.LossPercent(),
+		NAT:         h.NAT,
+		MTU:         h.MTU,
 	}
 
 	for _, p := range h.Probes {

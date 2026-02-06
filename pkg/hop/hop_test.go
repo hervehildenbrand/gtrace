@@ -271,6 +271,23 @@ func TestTraceResult_IsComplete_TrueWhenReachedTarget(t *testing.T) {
 	}
 }
 
+func TestHop_AddProbeWithTTL_StoresResponseTTL(t *testing.T) {
+	h := NewHop(5)
+	ip := net.ParseIP("10.0.0.1")
+
+	h.AddProbeWithTTL(ip, 10*time.Millisecond, 128)
+
+	if len(h.Probes) != 1 {
+		t.Fatalf("expected 1 probe, got %d", len(h.Probes))
+	}
+	if h.Probes[0].ResponseTTL != 128 {
+		t.Errorf("expected ResponseTTL 128, got %d", h.Probes[0].ResponseTTL)
+	}
+	if h.Probes[0].RTT != 10*time.Millisecond {
+		t.Errorf("expected RTT 10ms, got %v", h.Probes[0].RTT)
+	}
+}
+
 func TestTraceResult_TotalHops_ReturnsCount(t *testing.T) {
 	tr := NewTraceResult("google.com", "8.8.8.8")
 	tr.AddHop(NewHop(1))

@@ -75,6 +75,11 @@ func (r *SimpleRenderer) RenderHop(h *hop.Hop) string {
 				parts = append(parts, fmt.Sprintf("[MPLS: %s]", label.String()))
 			}
 		}
+
+		// NAT indicator
+		if h.NAT {
+			parts = append(parts, "[NAT]")
+		}
 	}
 
 	return strings.Join(parts, "  ")

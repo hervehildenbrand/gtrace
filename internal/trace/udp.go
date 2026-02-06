@@ -10,6 +10,7 @@ import (
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 // UDPTracer implements traceroute using UDP probes.
@@ -65,7 +66,11 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
-			h.AddProbe(pr.IP, pr.RTT)
+			if t.config.DetectNAT && pr.ResponseTTL > 0 {
+				h.AddProbeWithTTL(pr.IP, pr.RTT, pr.ResponseTTL)
+			} else {
+				h.AddProbe(pr.IP, pr.RTT)
+			}
 
 			// Set MPLS labels if discovered (first probe with labels wins)
 			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
@@ -74,6 +79,19 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 
 			if pr.IP.Equal(target) {
 				reached = true
+			}
+		}
+
+		// NAT detection via TTL analysis
+		if t.config.DetectNAT {
+			for _, p := range h.Probes {
+				if !p.Timeout && p.ResponseTTL > 0 {
+					expectedTTL := 64 - ttl
+					if DetectNATFromTTL(expectedTTL, p.ResponseTTL) {
+						h.NAT = true
+						break
+					}
+				}
 			}
 		}
 
@@ -134,10 +152,28 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	// Protocol number for parsing ICMP messages
 	protoNum := ICMPProtocolNum(target)
 
+	// Enable TTL control messages for NAT detection (IPv4 only)
+	isV6 := IsIPv6(target)
+	if !isV6 && t.config.DetectNAT {
+		_ = icmpConn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
+	}
+
 	// Wait for ICMP response
 	reply := make([]byte, 1500)
 	for {
-		n, peer, err := icmpConn.ReadFrom(reply)
+		var n int
+		var peer net.Addr
+		var responseTTL int
+
+		if !isV6 && t.config.DetectNAT {
+			var cm *ipv4.ControlMessage
+			n, cm, peer, err = icmpConn.IPv4PacketConn().ReadFrom(reply)
+			if cm != nil {
+				responseTTL = cm.TTL
+			}
+		} else {
+			n, peer, err = icmpConn.ReadFrom(reply)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +198,7 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 					if n > 8 {
 						mplsLabels = ExtractMPLSFromICMP(reply[8:n])
 					}
-					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels}, nil
+					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL}, nil
 				}
 			}
 		}
@@ -171,7 +207,7 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		if isDestUnreachable(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
 				if t.isOurProbeForIP(body.Data, port, target) {
-					return &probeResult{IP: peerIP, RTT: rtt}, nil
+					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL}, nil
 				}
 			}
 		}

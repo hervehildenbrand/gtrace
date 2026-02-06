@@ -9,9 +9,10 @@ import (
 
 // Probe represents a single traceroute probe result.
 type Probe struct {
-	IP      net.IP
-	RTT     time.Duration
-	Timeout bool
+	IP          net.IP
+	RTT         time.Duration
+	Timeout     bool
+	ResponseTTL int // TTL from response packet (for NAT detection)
 }
 
 // MPLSLabel represents an MPLS label from ICMP extensions (RFC 4950).
@@ -64,6 +65,15 @@ func (h *Hop) AddProbe(ip net.IP, rtt time.Duration) {
 	h.Probes = append(h.Probes, Probe{
 		IP:  ip,
 		RTT: rtt,
+	})
+}
+
+// AddProbeWithTTL records a successful probe response with response TTL for NAT detection.
+func (h *Hop) AddProbeWithTTL(ip net.IP, rtt time.Duration, responseTTL int) {
+	h.Probes = append(h.Probes, Probe{
+		IP:          ip,
+		RTT:         rtt,
+		ResponseTTL: responseTTL,
 	})
 }
 
