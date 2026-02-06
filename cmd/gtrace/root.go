@@ -732,7 +732,8 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 	fmt.Fprintf(cmd.OutOrStdout(), "Comparing traces to %s (local vs %s)\n", cfg.Target, cfg.From)
 	fmt.Fprintln(cmd.OutOrStdout(), "Running traces concurrently...")
 
-	var localResult, remoteResult *hop.TraceResult
+	var localResult *hop.TraceResult
+	var remoteResults []*hop.TraceResult
 	var localErr, remoteErr error
 	var wg sync.WaitGroup
 
@@ -750,7 +751,7 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 
 	go func() {
 		defer wg.Done()
-		remoteResult, remoteErr = runGlobalPingTraceForCompare(ctx, cmd.OutOrStdout(), cfg)
+		remoteResults, remoteErr = runGlobalPingTraceForCompare(ctx, cmd.OutOrStdout(), cfg)
 	}()
 
 	wg.Wait()
@@ -761,7 +762,7 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 	}
 
 	// Display comparison if we have at least one result
-	if localResult == nil && remoteResult == nil {
+	if localResult == nil && len(remoteResults) == 0 {
 		return fmt.Errorf("no trace results available")
 	}
 
@@ -771,10 +772,11 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 		localResult = hop.NewTraceResult(cfg.Target, "")
 		localResult.Source = "Local"
 	}
-	if remoteResult == nil {
+	if len(remoteResults) == 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nRemote trace failed: %v\n", remoteErr)
-		remoteResult = hop.NewTraceResult(cfg.Target, "")
-		remoteResult.Source = cfg.From
+		placeholder := hop.NewTraceResult(cfg.Target, "")
+		placeholder.Source = cfg.From
+		remoteResults = []*hop.TraceResult{placeholder}
 	}
 
 	// Set source labels
@@ -782,9 +784,9 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 
 	fmt.Fprintln(cmd.OutOrStdout())
 
-	// Render comparison
+	// Render comparison for all remotes
 	renderer := display.NewCompareRenderer(cmd.OutOrStdout(), cfg.NoColor)
-	return renderer.Render(localResult, remoteResult, cfg.From)
+	return renderer.RenderAll(localResult, remoteResults)
 }
 
 // runLocalTraceForCompare runs a local trace for compare mode (simple output, no TUI).
@@ -833,9 +835,9 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 	return result, nil
 }
 
-// runGlobalPingTraceForCompare runs a GlobalPing trace for compare mode (returns result only).
+// runGlobalPingTraceForCompare runs a GlobalPing trace for compare mode (returns all results).
 // Uses MTR instead of traceroute to get ASN data for richer output.
-func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config) (*hop.TraceResult, error) {
+func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config) ([]*hop.TraceResult, error) {
 	// Create client with retry notification
 	client := newGlobalPingClient(w, cfg.APIKey)
 
@@ -866,13 +868,16 @@ func runGlobalPingTraceForCompare(ctx context.Context, w io.Writer, cfg *Config)
 		return nil, fmt.Errorf("failed to get results: %w", err)
 	}
 
-	// Return first probe result
 	if len(measurement.Results) == 0 {
 		return nil, fmt.Errorf("no probe results")
 	}
 
-	result := measurement.Results[0].ToTraceResult(cfg.Target)
-	return result, nil
+	// Convert all probe results
+	results := make([]*hop.TraceResult, len(measurement.Results))
+	for i, pr := range measurement.Results {
+		results[i] = pr.ToTraceResult(cfg.Target)
+	}
+	return results, nil
 }
 
 // parseLatencyThreshold parses a latency threshold string (e.g., "100ms", "1s").
