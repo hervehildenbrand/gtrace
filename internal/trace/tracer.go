@@ -39,6 +39,10 @@ type Config struct {
 	Timeout       time.Duration
 	Port          int    // For UDP/TCP
 	SourceAddr    string // Source address to use
+	DetectNAT     bool   // Enable NAT detection via TTL analysis
+	ECMPFlows     int    // ECMP flow variations per hop (0=disabled)
+	DiscoverMTU   bool   // Enable Path MTU Discovery
+	ProbeSize     int    // Probe packet size in bytes
 }
 
 // DefaultConfig returns the default traceroute configuration.

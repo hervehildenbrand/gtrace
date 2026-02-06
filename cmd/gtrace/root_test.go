@@ -657,6 +657,116 @@ func TestDisplayMTRHop_LongHostnameWithASN_ShowsBoth(t *testing.T) {
 	}
 }
 
+func TestParseFlags_DetectNAT(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"--detect-nat", "--dry-run", "example.com"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	detectNAT, _ := cmd.Flags().GetBool("detect-nat")
+	if !detectNAT {
+		t.Error("expected detect-nat to be true")
+	}
+}
+
+func TestParseFlags_ECMPFlows(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"--ecmp-flows", "8", "--dry-run", "example.com"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	ecmpFlows, _ := cmd.Flags().GetInt("ecmp-flows")
+	if ecmpFlows != 8 {
+		t.Errorf("expected ecmp-flows 8, got %d", ecmpFlows)
+	}
+}
+
+func TestParseFlags_ECMPFlowsNegative(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"--ecmp-flows", "-1", "--dry-run", "example.com"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Error("expected error for negative ecmp-flows")
+	}
+	if !strings.Contains(err.Error(), "ecmp-flows") {
+		t.Errorf("error should mention ecmp-flows, got: %v", err)
+	}
+}
+
+func TestParseFlags_DiscoverMTU(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"--discover-mtu", "--dry-run", "example.com"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	discoverMTU, _ := cmd.Flags().GetBool("discover-mtu")
+	if !discoverMTU {
+		t.Error("expected discover-mtu to be true")
+	}
+}
+
+func TestParseFlags_ProbeSize(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"--probe-size", "1400", "--dry-run", "example.com"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	probeSize, _ := cmd.Flags().GetInt("probe-size")
+	if probeSize != 1400 {
+		t.Errorf("expected probe-size 1400, got %d", probeSize)
+	}
+}
+
+func TestParseFlags_ProbeSizeInvalid(t *testing.T) {
+	cmd := NewRootCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"--probe-size", "0", "--dry-run", "example.com"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Error("expected error for zero probe-size")
+	}
+	if !strings.Contains(err.Error(), "probe-size") {
+		t.Errorf("error should mention probe-size, got: %v", err)
+	}
+}
+
 func TestDisplayMTRHop_ColumnsAligned(t *testing.T) {
 	// Hop with ASN and hop without ASN should have stats at the same column position
 	withASN := new(bytes.Buffer)
