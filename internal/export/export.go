@@ -46,7 +46,7 @@ func NewExporter(format Format) (Exporter, error) {
 		return NewJSONExporter(), nil
 	case FormatCSV:
 		return NewCSVExporter(), nil
-	case FormatText:
+	case FormatText, "txt":
 		return NewTextExporter(), nil
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
