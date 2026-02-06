@@ -17,10 +17,14 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 |---------|--------|-----|------------|
 | MPLS label detection | Yes | No | No |
 | ECMP/load balancing detection | Yes | No | No |
+| Active ECMP probing (Paris-style) | Yes | No | No |
+| NAT detection | Yes | No | No |
+| Path MTU discovery | Yes | No | No |
 | GlobalPing integration | Yes | No | No |
 | ASN + geolocation enrichment | Yes | Partial | No |
 | IPv4/IPv6 dual-stack | Yes | Yes | Yes |
 | MTR-style continuous mode | Yes | Yes | No |
+| Latency jitter (StdDev) | Yes | Yes | No |
 | JSON/CSV export | Yes | Yes | No |
 
 ## Features
@@ -28,9 +32,12 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 - **Multi-Protocol Traceroute**: ICMP, UDP, and TCP probing
 - **IPv4/IPv6 Support**: Dual-stack with `-4` and `-6` flags
 - **MPLS Detection**: Extract and display MPLS label stacks from ICMP extensions
-- **ECMP Detection**: Identify load-balanced paths with multiple IPs per hop
+- **ECMP Detection**: Passive detection of load-balanced paths with multiple IPs per hop
+- **Active ECMP Probing**: Paris traceroute-style flow variation to actively discover ECMP paths
+- **NAT Detection**: Identify NAT devices along the path via response TTL analysis
+- **Path MTU Discovery**: Discover per-hop MTU using Don't Fragment bit and ICMP feedback
 - **Rich Enrichment**: ASN lookup, reverse DNS, geolocation, IX detection
-- **MTR Mode**: Continuous monitoring with real-time statistics
+- **MTR Mode**: Continuous monitoring with real-time statistics including latency jitter (StdDev)
 - **GlobalPing Integration**: Run traces from 500+ global probe locations
 - **Export Formats**: JSON, CSV, and text output
 
@@ -72,8 +79,17 @@ sudo gtrace 8.8.8.8 --simple
 # UDP traceroute with ECMP detection
 sudo gtrace cloudflare.com --simple --protocol udp --packets 6
 
+# Active ECMP probing (Paris traceroute-style)
+sudo gtrace cloudflare.com --simple --protocol udp --ecmp-flows 8
+
 # TCP traceroute to specific port
 sudo gtrace example.com --simple --protocol tcp --port 443
+
+# NAT detection
+sudo gtrace 8.8.8.8 --simple --detect-nat
+
+# Path MTU discovery
+sudo gtrace 8.8.8.8 --simple --discover-mtu --probe-size 1500
 
 # MTR-style continuous monitoring
 sudo gtrace 8.8.8.8
@@ -103,6 +119,15 @@ sudo gtrace -6 google.com --compare --from Paris
 | `--timeout` | Per-hop timeout | 500ms |
 | `--simple` | Simple output (no TUI) | false |
 
+### Detection & Discovery
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--detect-nat` | Enable NAT detection via TTL analysis | false |
+| `--ecmp-flows` | ECMP flow variations per hop (0=disabled) | 0 |
+| `--discover-mtu` | Enable Path MTU Discovery | false |
+| `--probe-size` | Probe packet size in bytes | 64 |
+
 ### MTR Mode
 
 | Flag | Description | Default |
@@ -129,7 +154,7 @@ sudo gtrace -6 google.com --compare --from Paris
 | Flag | Description |
 |------|-------------|
 | `-o, --output` | Export to file (format auto-detected from extension) |
-| `--format` | Explicit format: json, csv, txt |
+| `--format` | Explicit format: json, csv, text (or txt) |
 
 ### Enrichment
 
@@ -156,12 +181,45 @@ Output shows MPLS labels on backbone hops:
 ### Detect Load Balancing (ECMP)
 
 ```bash
+# Passive detection: send multiple probes and observe path divergence
 sudo gtrace cloudflare.com --simple --protocol udp --packets 8
+
+# Active probing: Paris traceroute-style flow variation
+sudo gtrace google.com --simple --protocol udp --ecmp-flows 8
 ```
 
 Multiple IPs at the same hop indicate ECMP:
 ```
- 8  141.101.67.83  141.101.67.95  141.101.67.115  [AS13335]  3.44ms
+ 6  72.14.202.232  72.14.205.190  193.251.255.104  72.14.204.184  [AS15169]  3.44ms
+```
+
+### Detect NAT Devices
+
+```bash
+sudo gtrace 8.8.8.8 --simple --detect-nat
+```
+
+NAT devices are identified by TTL anomalies in ICMP responses:
+```
+ 3  10.0.0.1  [AS3215]  5.42ms 4.89ms 5.01ms  [NAT]
+ 7  72.14.236.73  [AS15169]  8.21ms 7.98ms 8.44ms  [NAT]
+```
+
+### Path MTU Discovery
+
+```bash
+sudo gtrace 8.8.8.8 --simple --discover-mtu --probe-size 1500 --protocol udp
+```
+
+Discovers the MTU along the path using the Don't Fragment bit:
+```
+ 1  192.168.1.1  0.87ms 0.76ms 0.60ms
+ 2  80.10.255.25  [AS3215]  1.57ms 1.05ms 1.81ms  [MTU:1500]
+```
+
+When the probe size exceeds the path MTU, EMSGSIZE is reported locally:
+```
+ 1  * * *  [MTU:1500]
 ```
 
 ### IPv6 Traceroute
@@ -180,7 +238,7 @@ sudo gtrace -6 cloudflare.com --compare --from "Frankfurt,Singapore"
 sudo gtrace 8.8.8.8 --simple -o trace.json
 ```
 
-JSON includes full hop data with ASN, geolocation, and timing:
+JSON includes full hop data with ASN, geolocation, timing, and detection results:
 ```json
 {
   "target": "8.8.8.8",
@@ -189,7 +247,9 @@ JSON includes full hop data with ASN, geolocation, and timing:
       "ttl": 1,
       "ip": "192.168.1.1",
       "avgRtt": 0.5,
-      "lossPercent": 0
+      "lossPercent": 0,
+      "nat": true,
+      "mtu": 1500
     }
   ]
 }
