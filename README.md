@@ -120,7 +120,7 @@ sudo gtrace -6 google.com --compare --from Paris
 
 | Flag | Description |
 |------|-------------|
-| `--from` | Probe locations (city, country, ASN, or cloud region) |
+| `--from` | Probe locations, comma-separated (max 5) |
 | `--compare` | Compare local trace with remote probes |
 | `--api-key` | GlobalPing API key for higher rate limits |
 
@@ -198,10 +198,14 @@ JSON includes full hop data with ASN, geolocation, and timing:
 ### Compare Local vs Remote
 
 ```bash
+# Compare against a single remote location
+sudo gtrace 8.8.8.8 --compare --from Paris
+
+# Compare against multiple remote locations (up to 5)
 sudo gtrace 8.8.8.8 --compare --from "Paris,Tokyo"
 ```
 
-Shows side-by-side comparison of paths from different locations.
+Each remote location produces its own side-by-side comparison against the local trace, separated by `===`. Column headers show the actual probe location (e.g. "Paris, FR, OVH SAS").
 
 ## Architecture
 
