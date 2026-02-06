@@ -49,8 +49,12 @@ type Config struct {
 	DryRun   bool
 	DownloadDB bool
 	DBStatus   bool
-	IPv4Only bool // Force IPv4 only
-	IPv6Only bool // Force IPv6 only
+	IPv4Only    bool // Force IPv4 only
+	IPv6Only    bool // Force IPv6 only
+	DetectNAT   bool // Enable NAT detection via TTL analysis
+	ECMPFlows   int  // ECMP flow variations per hop (0=disabled)
+	DiscoverMTU bool // Enable Path MTU Discovery
+	ProbeSize   int  // Probe packet size in bytes
 }
 
 var validProtocols = map[string]bool{
@@ -133,6 +137,14 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 			// -4 and -6 are mutually exclusive
 			if cfg.IPv4Only && cfg.IPv6Only {
 				return fmt.Errorf("-4/--ipv4 and -6/--ipv6 are mutually exclusive")
+			}
+
+			// Validate diagnostic flags
+			if cfg.ECMPFlows < 0 {
+				return fmt.Errorf("--ecmp-flows must be >= 0")
+			}
+			if cfg.ProbeSize < 1 {
+				return fmt.Errorf("--probe-size must be >= 1")
 			}
 
 			// Check privileges early for local traces
@@ -222,6 +234,12 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	// IP version flags
 	cmd.Flags().BoolVarP(&cfg.IPv4Only, "ipv4", "4", false, "Use IPv4 only")
 	cmd.Flags().BoolVarP(&cfg.IPv6Only, "ipv6", "6", false, "Use IPv6 only")
+
+	// Advanced diagnostics flags
+	cmd.Flags().BoolVar(&cfg.DetectNAT, "detect-nat", false, "Enable NAT detection via TTL analysis")
+	cmd.Flags().IntVar(&cfg.ECMPFlows, "ecmp-flows", 0, "ECMP flow variations per hop (0=disabled, 8=recommended)")
+	cmd.Flags().BoolVar(&cfg.DiscoverMTU, "discover-mtu", false, "Enable Path MTU Discovery")
+	cmd.Flags().IntVar(&cfg.ProbeSize, "probe-size", 64, "Probe packet size in bytes")
 
 	return cmd
 }
@@ -320,6 +338,10 @@ func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.T
 			PacketsPerHop: cfg.Packets,
 			Timeout:       timeout,
 			Port:          cfg.Port,
+			DetectNAT:     cfg.DetectNAT,
+			ECMPFlows:     cfg.ECMPFlows,
+			DiscoverMTU:   cfg.DiscoverMTU,
+			ProbeSize:     cfg.ProbeSize,
 		}
 
 		// Create tracer
@@ -350,6 +372,10 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 		PacketsPerHop: 1, // MTR-style: 1 probe per hop per cycle
 		Timeout:       timeout,
 		Port:          cfg.Port,
+		DetectNAT:     cfg.DetectNAT,
+		ECMPFlows:     cfg.ECMPFlows,
+		DiscoverMTU:   cfg.DiscoverMTU,
+		ProbeSize:     cfg.ProbeSize,
 	}
 
 	// Create tracer
@@ -810,6 +836,10 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 		PacketsPerHop: cfg.Packets,
 		Timeout:       timeout,
 		Port:          cfg.Port,
+		DetectNAT:     cfg.DetectNAT,
+		ECMPFlows:     cfg.ECMPFlows,
+		DiscoverMTU:   cfg.DiscoverMTU,
+		ProbeSize:     cfg.ProbeSize,
 	}
 
 	// Create tracer
@@ -930,6 +960,10 @@ func runMonitor(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
 		PacketsPerHop: cfg.Packets,
 		Timeout:       timeout,
 		Port:          cfg.Port,
+		DetectNAT:     cfg.DetectNAT,
+		ECMPFlows:     cfg.ECMPFlows,
+		DiscoverMTU:   cfg.DiscoverMTU,
+		ProbeSize:     cfg.ProbeSize,
 	}
 
 	// Create tracer
