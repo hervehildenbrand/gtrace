@@ -204,6 +204,40 @@ func TestHopStats_RTTHistory_RingBuffer(t *testing.T) {
 	}
 }
 
+func TestHopStats_StdDev(t *testing.T) {
+	tests := []struct {
+		name string
+		rtts []time.Duration
+		want time.Duration // approximate
+	}{
+		{"no samples", nil, 0},
+		{"single", []time.Duration{10 * time.Millisecond}, 0},
+		{"identical", []time.Duration{10 * time.Millisecond, 10 * time.Millisecond}, 0},
+		{"varied", []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 30 * time.Millisecond}, 8165 * time.Microsecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewHopStats(1)
+			ip := net.ParseIP("1.1.1.1")
+			for _, rtt := range tt.rtts {
+				s.AddProbe(ip, rtt)
+			}
+			got := s.StdDev()
+			// 10% tolerance
+			diff := got - tt.want
+			if diff < 0 {
+				diff = -diff
+			}
+			if tt.want > 0 && float64(diff) > float64(tt.want)*0.1 {
+				t.Errorf("StdDev() = %v, want ~%v", got, tt.want)
+			}
+			if tt.want == 0 && got != 0 {
+				t.Errorf("StdDev() = %v, want 0", got)
+			}
+		})
+	}
+}
+
 func TestHopStats_SetEnrichment(t *testing.T) {
 	stats := NewHopStats(1)
 	enrichment := hop.Enrichment{

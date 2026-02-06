@@ -1,6 +1,7 @@
 package display
 
 import (
+	"math"
 	"net"
 	"time"
 
@@ -79,6 +80,25 @@ func (s *HopStats) AvgRTT() time.Duration {
 		return 0
 	}
 	return s.SumRTT / time.Duration(s.Recv)
+}
+
+// StdDev calculates the standard deviation of RTT values.
+func (s *HopStats) StdDev() time.Duration {
+	if len(s.RTTHistory) < 2 {
+		return 0
+	}
+	var sum float64
+	for _, rtt := range s.RTTHistory {
+		sum += float64(rtt)
+	}
+	mean := sum / float64(len(s.RTTHistory))
+	var variance float64
+	for _, rtt := range s.RTTHistory {
+		d := float64(rtt) - mean
+		variance += d * d
+	}
+	variance /= float64(len(s.RTTHistory))
+	return time.Duration(math.Sqrt(variance))
 }
 
 // Reset clears all statistics while preserving the TTL.

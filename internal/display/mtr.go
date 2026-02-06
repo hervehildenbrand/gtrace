@@ -189,6 +189,7 @@ const (
 	colAvg      = 8
 	colWrst     = 8
 	colLast     = 8
+	colStdDev   = 8
 )
 
 // getHostColumnWidth returns the appropriate host column width.
@@ -213,7 +214,7 @@ func (m *MTRModel) View() string {
 
 	// Header (mtr-style columns)
 	colHost := m.getHostColumnWidth()
-	header := fmt.Sprintf("%-*s %-*s %*s %*s %*s %*s %*s %*s %*s %s",
+	header := fmt.Sprintf("%-*s %-*s %*s %*s %*s %*s %*s %*s %*s %*s %s",
 		colHop, "Hop",
 		colHost, "Host",
 		colLoss, "Loss%",
@@ -223,10 +224,11 @@ func (m *MTRModel) View() string {
 		colAvg, "Avg",
 		colWrst, "Wrst",
 		colLast, "Last",
+		colStdDev, "StDev",
 		"Graph")
 	b.WriteString(headerStyle.Render(header))
 	b.WriteString("\n")
-	lineWidth := colHop + 1 + colHost + 1 + colLoss + 1 + colSnt + 1 + colRecv + 1 + colBest + 1 + colAvg + 1 + colWrst + 1 + colLast + 10
+	lineWidth := colHop + 1 + colHost + 1 + colLoss + 1 + colSnt + 1 + colRecv + 1 + colBest + 1 + colAvg + 1 + colWrst + 1 + colLast + 1 + colStdDev + 10
 	b.WriteString(strings.Repeat("─", lineWidth))
 	b.WriteString("\n")
 
@@ -333,6 +335,15 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 		b.WriteString(rttStyle.Render(lastStr))
 	} else {
 		b.WriteString(timeoutStyle.Render(fmt.Sprintf("%*s", colLast, "-")))
+	}
+	b.WriteString(" ")
+
+	// StdDev - pad then style
+	stdDev := stats.StdDev()
+	if stdDev > 0 {
+		b.WriteString(rttStyle.Render(fmt.Sprintf("%*.1f", colStdDev, float64(stdDev)/float64(time.Millisecond))))
+	} else {
+		b.WriteString(timeoutStyle.Render(fmt.Sprintf("%*s", colStdDev, "-")))
 	}
 	b.WriteString(" ")
 
