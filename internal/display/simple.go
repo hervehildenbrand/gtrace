@@ -80,6 +80,11 @@ func (r *SimpleRenderer) RenderHop(h *hop.Hop) string {
 		if h.NAT {
 			parts = append(parts, "[NAT]")
 		}
+
+		// MTU indicator
+		if h.MTU > 0 {
+			parts = append(parts, fmt.Sprintf("[MTU:%d]", h.MTU))
+		}
 	}
 
 	return strings.Join(parts, "  ")

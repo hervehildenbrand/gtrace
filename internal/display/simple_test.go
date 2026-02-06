@@ -157,6 +157,32 @@ func TestSimpleRenderer_RenderTrace_ShowsHeader(t *testing.T) {
 	}
 }
 
+func TestSimpleRenderer_RenderHop_ShowsNAT(t *testing.T) {
+	r := NewSimpleRenderer()
+	h := hop.NewHop(1)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	h.NAT = true
+
+	result := r.RenderHop(h)
+
+	if !strings.Contains(result, "[NAT]") {
+		t.Errorf("expected [NAT] in output, got %q", result)
+	}
+}
+
+func TestSimpleRenderer_RenderHop_ShowsMTU(t *testing.T) {
+	r := NewSimpleRenderer()
+	h := hop.NewHop(1)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	h.MTU = 1400
+
+	result := r.RenderHop(h)
+
+	if !strings.Contains(result, "[MTU:1400]") {
+		t.Errorf("expected [MTU:1400] in output, got %q", result)
+	}
+}
+
 func TestSimpleRenderer_FormatRTT_FormatsMilliseconds(t *testing.T) {
 	r := NewSimpleRenderer()
 

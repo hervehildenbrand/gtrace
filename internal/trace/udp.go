@@ -82,6 +82,11 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				h.SetMPLS(pr.MPLS)
 			}
 
+			// Set MTU if discovered
+			if pr.MTU > 0 && h.MTU == 0 {
+				h.MTU = pr.MTU
+			}
+
 			if pr.IP.Equal(target) {
 				reached = true
 			}
@@ -212,7 +217,15 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		if isDestUnreachable(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
 				if t.isOurProbeForIP(body.Data, port, target) {
-					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL}, nil
+					// Check for Fragmentation Needed (Code 4) with MTU discovery
+					var mtu int
+					if rm.Code == 4 && t.config.DiscoverMTU && n >= 8 {
+						mtu = int(reply[6])<<8 | int(reply[7])
+						if mtu < MinMTU {
+							mtu = 0
+						}
+					}
+					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu}, nil
 				}
 			}
 		}
