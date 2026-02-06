@@ -36,6 +36,19 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 
 ## Installation
 
+### Precompiled Binaries
+
+Download the latest release for your platform from the [Releases page](https://github.com/hervehildenbrand/gtrace/releases).
+
+Available for Linux, macOS, and Windows (amd64 and arm64).
+
+```bash
+# Example: Linux amd64 (replace VERSION with the desired release, e.g. 0.3.3)
+curl -LO https://github.com/hervehildenbrand/gtrace/releases/download/vVERSION/gtrace_VERSION_linux_amd64.tar.gz
+tar xzf gtrace_VERSION_linux_amd64.tar.gz
+sudo mv gtrace /usr/local/bin/
+```
+
 ### From Source
 
 ```bash
