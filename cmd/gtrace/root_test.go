@@ -9,7 +9,7 @@ import (
 )
 
 func TestRootCommand_RequiresTarget(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -23,7 +23,7 @@ func TestRootCommand_RequiresTarget(t *testing.T) {
 }
 
 func TestRootCommand_AcceptsTarget(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -38,7 +38,7 @@ func TestRootCommand_AcceptsTarget(t *testing.T) {
 }
 
 func TestRootCommand_ParsesFromFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -57,7 +57,7 @@ func TestRootCommand_ParsesFromFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesProtocolFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -76,7 +76,7 @@ func TestRootCommand_ParsesProtocolFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesPortFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -95,7 +95,7 @@ func TestRootCommand_ParsesPortFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesMaxHopsFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -114,7 +114,7 @@ func TestRootCommand_ParsesMaxHopsFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesCompareFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -133,7 +133,7 @@ func TestRootCommand_ParsesCompareFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesMonitorFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -152,7 +152,7 @@ func TestRootCommand_ParsesMonitorFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesOutputFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -171,7 +171,7 @@ func TestRootCommand_ParsesOutputFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesSimpleFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -190,7 +190,7 @@ func TestRootCommand_ParsesSimpleFlag(t *testing.T) {
 }
 
 func TestRootCommand_ValidatesProtocol(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -204,7 +204,7 @@ func TestRootCommand_ValidatesProtocol(t *testing.T) {
 }
 
 func TestRootCommand_DefaultValues(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 
 	protocol, _ := cmd.Flags().GetString("protocol")
 	if protocol != "icmp" {
@@ -223,7 +223,7 @@ func TestRootCommand_DefaultValues(t *testing.T) {
 }
 
 func TestRootCommand_EnrichmentEnabledByDefault(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 
 	// Enrichment should be enabled by default (offline=false)
 	offline, _ := cmd.Flags().GetBool("offline")
@@ -233,7 +233,7 @@ func TestRootCommand_EnrichmentEnabledByDefault(t *testing.T) {
 }
 
 func TestRootCommand_ParsesAlertLatencyFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -252,7 +252,7 @@ func TestRootCommand_ParsesAlertLatencyFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesAlertLossFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -271,7 +271,7 @@ func TestRootCommand_ParsesAlertLossFlag(t *testing.T) {
 }
 
 func TestRootCommand_SimpleDefaultsFalse(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 
 	// TUI should be default, so --simple should default to false
 	simple, _ := cmd.Flags().GetBool("simple")
@@ -328,7 +328,7 @@ func TestParseLossThreshold_Valid(t *testing.T) {
 }
 
 func TestRootCommand_DBStatus(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -347,7 +347,7 @@ func TestRootCommand_DBStatus(t *testing.T) {
 }
 
 func TestRootCommand_DownloadDB(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -366,7 +366,7 @@ func TestRootCommand_DownloadDB(t *testing.T) {
 }
 
 func TestRootCommand_MTRModeDefaultValues(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 
 	// Check MTR mode default interval
 	interval, _ := cmd.Flags().GetString("interval")
@@ -388,7 +388,7 @@ func TestRootCommand_MTRModeDefaultValues(t *testing.T) {
 }
 
 func TestRootCommand_ParsesIntervalFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -407,7 +407,7 @@ func TestRootCommand_ParsesIntervalFlag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesCyclesFlag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -426,7 +426,7 @@ func TestRootCommand_ParsesCyclesFlag(t *testing.T) {
 }
 
 func TestRootCommand_CompareRequiresFrom(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -444,7 +444,7 @@ func TestRootCommand_CompareRequiresFrom(t *testing.T) {
 }
 
 func TestRootCommand_ParsesIPv4Flag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -463,7 +463,7 @@ func TestRootCommand_ParsesIPv4Flag(t *testing.T) {
 }
 
 func TestRootCommand_ParsesIPv6Flag(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -482,7 +482,7 @@ func TestRootCommand_ParsesIPv6Flag(t *testing.T) {
 }
 
 func TestRootCommand_IPv4AndIPv6AreMutuallyExclusive(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -499,7 +499,7 @@ func TestRootCommand_IPv4AndIPv6AreMutuallyExclusive(t *testing.T) {
 }
 
 func TestRootCommand_IPv4DefaultsFalse(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 
 	ipv4, _ := cmd.Flags().GetBool("ipv4")
 	if ipv4 {
@@ -508,7 +508,7 @@ func TestRootCommand_IPv4DefaultsFalse(t *testing.T) {
 }
 
 func TestRootCommand_IPv6DefaultsFalse(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 
 	ipv6, _ := cmd.Flags().GetBool("ipv6")
 	if ipv6 {
@@ -538,7 +538,7 @@ func TestGetIPVersion_IPv6Only(t *testing.T) {
 }
 
 func TestRootCommand_FromRejectsTooManyLocations(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -555,7 +555,7 @@ func TestRootCommand_FromRejectsTooManyLocations(t *testing.T) {
 }
 
 func TestRootCommand_FromAcceptsFiveLocations(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -658,7 +658,7 @@ func TestDisplayMTRHop_LongHostnameWithASN_ShowsBoth(t *testing.T) {
 }
 
 func TestParseFlags_DetectNAT(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -677,7 +677,7 @@ func TestParseFlags_DetectNAT(t *testing.T) {
 }
 
 func TestParseFlags_ECMPFlows(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -696,7 +696,7 @@ func TestParseFlags_ECMPFlows(t *testing.T) {
 }
 
 func TestParseFlags_ECMPFlowsNegative(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -713,7 +713,7 @@ func TestParseFlags_ECMPFlowsNegative(t *testing.T) {
 }
 
 func TestParseFlags_DiscoverMTU(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -732,7 +732,7 @@ func TestParseFlags_DiscoverMTU(t *testing.T) {
 }
 
 func TestParseFlags_ProbeSize(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
@@ -751,7 +751,7 @@ func TestParseFlags_ProbeSize(t *testing.T) {
 }
 
 func TestParseFlags_ProbeSizeInvalid(t *testing.T) {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd("dev")
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
