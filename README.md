@@ -26,6 +26,7 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 | MTR-style continuous mode | Yes | Yes | No |
 | Latency jitter (StdDev) | Yes | Yes | No |
 | JSON/CSV export | Yes | Yes | No |
+| Built-in self-update | Yes | No | No |
 
 ## Features
 
@@ -164,6 +165,19 @@ sudo gtrace -6 google.com --compare --from Paris
 | `--db-status` | Show GeoIP database status |
 | `--download-db` | Instructions to download GeoIP databases |
 
+### Self-Update
+
+gtrace checks for new versions on startup and displays a notification after the trace completes. To upgrade in place:
+
+```bash
+gtrace upgrade          # Interactive prompt
+gtrace upgrade --force  # Non-interactive
+```
+
+| Environment Variable | Description |
+|---------------------|-------------|
+| `GTRACE_NO_UPDATE_CHECK=1` | Disable the automatic update check on startup |
+
 ## Examples
 
 ### Detect MPLS Labels
@@ -278,7 +292,8 @@ gtrace/
 │   ├── enrich/          # ASN, geo, rDNS enrichment
 │   ├── export/          # JSON, CSV, text exporters
 │   ├── globalping/      # GlobalPing API client
-│   └── monitor/         # Route change detection
+│   ├── monitor/         # Route change detection
+│   └── update/          # Auto-update and self-upgrade
 └── pkg/hop/             # Hop data structures
 ```
 
