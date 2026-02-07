@@ -19,6 +19,7 @@ import (
 	"github.com/hervehildenbrand/gtrace/internal/globalping"
 	"github.com/hervehildenbrand/gtrace/internal/monitor"
 	"github.com/hervehildenbrand/gtrace/internal/trace"
+	"github.com/hervehildenbrand/gtrace/internal/update"
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"github.com/spf13/cobra"
 )
@@ -55,6 +56,8 @@ type Config struct {
 	ECMPFlows   int  // ECMP flow variations per hop (0=disabled)
 	DiscoverMTU bool // Enable Path MTU Discovery
 	ProbeSize   int  // Probe packet size in bytes
+
+	updateResult <-chan *update.CheckResult
 }
 
 var validProtocols = map[string]bool{
@@ -95,7 +98,7 @@ func newEnricher(offline bool) enrich.EnricherInterface {
 }
 
 // NewRootCmd creates and returns the root cobra command.
-func NewRootCmd() *cobra.Command {
+func NewRootCmd(version string) *cobra.Command {
 	var cfg Config
 
 	cmd := &cobra.Command{
@@ -156,6 +159,11 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 				}
 			}
 
+			// Start non-blocking update check
+			if version != "dev" && os.Getenv("GTRACE_NO_UPDATE_CHECK") != "1" {
+				cfg.updateResult = startUpdateCheck(version)
+			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -188,7 +196,9 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 				return nil
 			}
 
-			return runTrace(cmd, &cfg)
+			err := runTrace(cmd, &cfg)
+			printUpdateNotification(cmd.ErrOrStderr(), cfg.updateResult)
+			return err
 		},
 	}
 
@@ -1022,4 +1032,28 @@ func runMonitor(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
 
 	// Run monitoring loop
 	return mon.Run(ctx, traceFn)
+}
+
+func startUpdateCheck(version string) <-chan *update.CheckResult {
+	ch := make(chan *update.CheckResult, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		ch <- update.NewChecker().Check(ctx, version)
+	}()
+	return ch
+}
+
+func printUpdateNotification(w io.Writer, ch <-chan *update.CheckResult) {
+	if ch == nil {
+		return
+	}
+	select {
+	case r := <-ch:
+		if r != nil && r.UpdateAvailable {
+			fmt.Fprintf(w, "\nA new version of gtrace is available: %s → %s\nRun 'gtrace upgrade' or visit %s\n",
+				r.CurrentVersion, r.LatestVersion, r.ReleaseURL)
+		}
+	default:
+	}
 }
