@@ -9,8 +9,12 @@ import (
 var Version = "dev"
 
 func main() {
-	cmd := NewRootCmd()
+	cmd := NewRootCmd(Version)
 	cmd.Version = Version
+
+	if Version != "dev" {
+		cmd.AddCommand(NewUpgradeCmd(Version))
+	}
 
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
