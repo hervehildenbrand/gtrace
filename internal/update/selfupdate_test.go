@@ -89,9 +89,13 @@ func TestDownloadAsset_ServerError(t *testing.T) {
 }
 
 func TestExtractBinary_TarGz(t *testing.T) {
+	binaryName := "gtrace"
+	if runtime.GOOS == "windows" {
+		binaryName = "gtrace.exe"
+	}
 	binaryContent := []byte("#!/bin/sh\necho hello")
 	archive := createTarGz(t, map[string][]byte{
-		"gtrace": binaryContent,
+		binaryName: binaryContent,
 	})
 
 	tmpFile := filepath.Join(t.TempDir(), "test.tar.gz")
