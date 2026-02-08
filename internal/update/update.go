@@ -40,6 +40,10 @@ func NewChecker() *Checker {
 // Check queries GitHub for the latest release and compares it to currentVersion.
 // Returns nil if no update is available, or if the check fails for any reason.
 func (c *Checker) Check(ctx context.Context, currentVersion string) *CheckResult {
+	// Treat "dev" builds as 0.0.0 so any release is considered an upgrade.
+	if currentVersion == "dev" {
+		currentVersion = "0.0.0"
+	}
 	current, err := ParseVersion(currentVersion)
 	if err != nil {
 		return nil

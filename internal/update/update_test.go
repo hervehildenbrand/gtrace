@@ -83,11 +83,27 @@ func TestChecker_NetworkError_ReturnsNil(t *testing.T) {
 	}
 }
 
-func TestChecker_DevVersion_ReturnsNil(t *testing.T) {
-	c := NewChecker()
+func TestChecker_DevVersion_FindsUpdate(t *testing.T) {
+	assetName := getAssetName("0.6.0")
+	srv := newTestServer(t, githubRelease{
+		TagName: "v0.6.0",
+		HTMLURL: "https://github.com/hervehildenbrand/gtrace/releases/tag/v0.6.0",
+		Assets: []githubAsset{
+			{Name: assetName, BrowserDownloadURL: "https://example.com/" + assetName},
+		},
+	})
+	defer srv.Close()
+
+	c := &Checker{baseURL: srv.URL, httpClient: srv.Client()}
 	result := c.Check(context.Background(), "dev")
-	if result != nil {
-		t.Errorf("expected nil for dev version, got %+v", result)
+	if result == nil {
+		t.Fatal("expected non-nil result for dev version when release exists")
+	}
+	if !result.UpdateAvailable {
+		t.Error("expected UpdateAvailable to be true")
+	}
+	if result.CurrentVersion != "0.0.0" {
+		t.Errorf("CurrentVersion = %q, want %q for dev build", result.CurrentVersion, "0.0.0")
 	}
 }
 
