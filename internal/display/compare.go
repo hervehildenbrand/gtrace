@@ -175,9 +175,11 @@ func (r *CompareRenderer) renderUnified(sources []*hop.TraceResult) error {
 }
 
 // renderStacked renders each source in its own bordered box.
+// Builds box manually with Unicode box-drawing characters to avoid
+// ANSI escape code corruption from lipgloss border title insertion.
 func (r *CompareRenderer) renderStacked(sources []*hop.TraceResult) error {
 	common := computeCommonHops(sources)
-	boxWidth := r.termWidth - 4 // account for border chars + padding
+	boxWidth := r.termWidth - 2 // account for left/right border chars
 	if boxWidth < 40 {
 		boxWidth = 40
 	}
@@ -199,52 +201,37 @@ func (r *CompareRenderer) renderStacked(sources []*hop.TraceResult) error {
 			}
 		}
 
-		// Build box content
-		var content strings.Builder
+		contentWidth := boxWidth - 4 // padding inside box
+
+		// Top border with title: ╭─ Name ─────────╮
+		title := fmt.Sprintf("─ %s ", name)
+		titleRuneLen := runeDisplayWidth(title)
+		fillLen := boxWidth - titleRuneLen - 1 // -1 for ╭
+		if fillLen < 1 {
+			fillLen = 1
+		}
+		topBorder := "╭" + title + strings.Repeat("─", fillLen) + "╮"
+		fmt.Fprintln(r.writer, r.colorize(topBorder, i))
+
+		// Content rows
 		for _, h := range src.Hops {
-			cell := r.formatHopCell(h, boxWidth-8, maxRTT, common, h.TTL)
-			fmt.Fprintf(&content, "  %s\n", cell)
-		}
-		fmt.Fprintf(&content, "\n  %s", r.formatSummary(src))
-
-		// Render box with lipgloss
-		color := sourceColors[i%len(sourceColors)]
-		style := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(color).
-			Width(boxWidth).
-			Padding(0, 1)
-
-		if r.noColor {
-			style = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				Width(boxWidth).
-				Padding(0, 1)
+			cell := r.formatHopCell(h, contentWidth, maxRTT, common, h.TTL)
+			line := fmt.Sprintf("│  %s  │", padToWidth(cell, contentWidth))
+			fmt.Fprintln(r.writer, r.colorize(line, i))
 		}
 
-		// Title line
-		titleLine := fmt.Sprintf("─ %s ", name)
-		box := style.Render(content.String())
+		// Blank line before summary
+		blankLine := fmt.Sprintf("│  %s  │", strings.Repeat(" ", contentWidth))
+		fmt.Fprintln(r.writer, r.colorize(blankLine, i))
 
-		// Insert title into top border
-		if len(box) > 3+len(titleLine) {
-			lines := strings.Split(box, "\n")
-			if len(lines) > 0 {
-				topBorder := lines[0]
-				runes := []rune(topBorder)
-				titleRunes := []rune(titleLine)
-				// Insert title after the first corner char (╭)
-				if len(runes) > 2+len(titleRunes) {
-					for j, tr := range titleRunes {
-						runes[2+j] = tr
-					}
-					lines[0] = string(runes)
-				}
-				box = strings.Join(lines, "\n")
-			}
-		}
+		// Summary line
+		summary := r.formatSummary(src)
+		summaryLine := fmt.Sprintf("│  %s  │", padToWidth(summary, contentWidth))
+		fmt.Fprintln(r.writer, r.colorize(summaryLine, i))
 
-		fmt.Fprintln(r.writer, box)
+		// Bottom border: ╰──────────────────╯
+		bottomBorder := "╰" + strings.Repeat("─", boxWidth) + "╯"
+		fmt.Fprintln(r.writer, r.colorize(bottomBorder, i))
 
 		if i < len(sources)-1 {
 			fmt.Fprintln(r.writer)
@@ -252,6 +239,15 @@ func (r *CompareRenderer) renderStacked(sources []*hop.TraceResult) error {
 	}
 
 	return nil
+}
+
+// padToWidth pads a string with spaces to exactly width display columns.
+func padToWidth(s string, width int) string {
+	displayLen := runeDisplayWidth(s)
+	if displayLen >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-displayLen)
 }
 
 // formatHopCell formats a single hop within a column of given width.
