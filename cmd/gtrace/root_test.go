@@ -800,3 +800,79 @@ func TestDisplayMTRHop_ColumnsAligned(t *testing.T) {
 			posWith, posWithout, outWith, outWithout)
 	}
 }
+
+func TestRootCommand_NoLocalImpliesCompare(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	// --no-local with two --from locations should work (implies --compare)
+	cmd.SetArgs([]string{"google.com", "--no-local", "--from", "Paris,London", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	compare, _ := cmd.Flags().GetBool("compare")
+	noLocal, _ := cmd.Flags().GetBool("no-local")
+	if !compare {
+		t.Error("--no-local should imply --compare=true")
+	}
+	if !noLocal {
+		t.Error("expected no-local to be true")
+	}
+}
+
+func TestRootCommand_NoLocalRequiresTwoLocations(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	// --no-local with only one --from location should error
+	cmd.SetArgs([]string{"google.com", "--no-local", "--from", "Paris", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error when --no-local has only 1 location")
+	}
+	if !strings.Contains(err.Error(), "2") {
+		t.Errorf("error should mention requiring >= 2 locations, got: %v", err)
+	}
+}
+
+func TestRootCommand_NoLocalRequiresFrom(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	// --no-local without --from should error
+	cmd.SetArgs([]string{"google.com", "--no-local", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error when --no-local is used without --from")
+	}
+	if !strings.Contains(err.Error(), "--from") {
+		t.Errorf("error should mention --from, got: %v", err)
+	}
+}
+
+func TestRootCommand_NoLocalSkipsLocalPrivilegeCheck(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	// --no-local should NOT require root privileges since local trace is skipped
+	cmd.SetArgs([]string{"google.com", "--no-local", "--from", "Paris,London", "--dry-run"})
+
+	err := cmd.Execute()
+
+	// Should succeed with --dry-run even without root
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
