@@ -876,3 +876,42 @@ func TestRootCommand_NoLocalSkipsLocalPrivilegeCheck(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestSetupCmd_UpgradeRegisteredForDevBuild(t *testing.T) {
+	// Simulate what main() does — upgrade must be available even for dev builds
+	cmd := SetupCmd("dev")
+
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"upgrade", "--help"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("upgrade --help should succeed in dev build, got: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Upgrade gtrace") {
+		t.Error("upgrade --help should show the upgrade description")
+	}
+}
+
+func TestSetupCmd_UpgradeRegisteredForReleaseBuild(t *testing.T) {
+	cmd := SetupCmd("1.2.3")
+
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"upgrade", "--help"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("upgrade --help should succeed in release build, got: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Upgrade gtrace") {
+		t.Error("upgrade --help should show the upgrade description")
+	}
+}

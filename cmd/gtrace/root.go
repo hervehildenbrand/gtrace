@@ -173,7 +173,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 			}
 
 			// Start non-blocking update check
-			if version != "dev" && os.Getenv("GTRACE_NO_UPDATE_CHECK") != "1" {
+			if os.Getenv("GTRACE_NO_UPDATE_CHECK") != "1" {
 				cfg.updateResult = startUpdateCheck(version)
 			}
 
