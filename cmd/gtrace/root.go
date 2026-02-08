@@ -36,6 +36,7 @@ type Config struct {
 	Interval string // MTR mode: interval between trace cycles
 	Cycles   int    // MTR mode: number of cycles (0 = infinite)
 	Compare  bool
+	NoLocal  bool
 	View     string
 	Monitor  bool
 	AlertLatency string
@@ -137,6 +138,18 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 				}
 			}
 
+			// --no-local requires --from with >= 2 locations and implies --compare
+			if cfg.NoLocal {
+				if cfg.From == "" {
+					return fmt.Errorf("--no-local requires --from to specify remote locations")
+				}
+				locations := globalping.ParseLocationStrings(cfg.From)
+				if len(locations) < 2 {
+					return fmt.Errorf("--no-local requires --from with at least 2 locations")
+				}
+				cfg.Compare = true
+			}
+
 			// -4 and -6 are mutually exclusive
 			if cfg.IPv4Only && cfg.IPv6Only {
 				return fmt.Errorf("-4/--ipv4 and -6/--ipv6 are mutually exclusive")
@@ -152,7 +165,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 
 			// Check privileges early for local traces
 			// Skip for: --from only (GlobalPing API), --dry-run, --compare (checked at runtime)
-			needsLocalTrace := cfg.From == "" || cfg.Compare
+			needsLocalTrace := (cfg.From == "" || cfg.Compare) && !cfg.NoLocal
 			if needsLocalTrace && !cfg.DryRun {
 				if err := trace.CheckPrivileges(); err != nil {
 					return err
@@ -205,6 +218,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	// Source location flags
 	cmd.Flags().StringVar(&cfg.From, "from", "", "Run from GlobalPing location(s), comma-separated (max 5)")
 	cmd.Flags().BoolVar(&cfg.Compare, "compare", false, "Compare local + remote traces")
+	cmd.Flags().BoolVar(&cfg.NoLocal, "no-local", false, "Skip local trace, compare remote locations only")
 	cmd.Flags().StringVar(&cfg.View, "view", "side", "Display mode: side|tabs|unified")
 
 	// Protocol flags
@@ -765,7 +779,11 @@ func displayMTRHop(w io.Writer, ttl int, mh *globalping.MTRHop) {
 
 // runCompareMode runs local and remote traces concurrently and displays side-by-side.
 func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
-	fmt.Fprintf(cmd.OutOrStdout(), "Comparing traces to %s (local vs %s)\n", cfg.Target, cfg.From)
+	if cfg.NoLocal {
+		fmt.Fprintf(cmd.OutOrStdout(), "Comparing remote traces to %s from %s\n", cfg.Target, cfg.From)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "Comparing traces to %s (local vs %s)\n", cfg.Target, cfg.From)
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), "Running traces concurrently...")
 
 	var localResult *hop.TraceResult
@@ -773,56 +791,68 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 	var localErr, remoteErr error
 	var wg sync.WaitGroup
 
-	// Run both traces concurrently
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		// Force simple mode for local trace in compare mode
-		localCfg := *cfg
-		localCfg.Simple = true
-		localCfg.From = "" // Clear to run local
-		localResult, localErr = runLocalTraceForCompare(ctx, &localCfg)
-	}()
-
-	go func() {
-		defer wg.Done()
-		remoteResults, remoteErr = runGlobalPingTraceForCompare(ctx, cmd.OutOrStdout(), cfg)
-	}()
+	if cfg.NoLocal {
+		// Only run remote traces
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			remoteResults, remoteErr = runGlobalPingTraceForCompare(ctx, cmd.OutOrStdout(), cfg)
+		}()
+	} else {
+		// Run both local and remote traces concurrently
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			localCfg := *cfg
+			localCfg.Simple = true
+			localCfg.From = ""
+			localResult, localErr = runLocalTraceForCompare(ctx, &localCfg)
+		}()
+		go func() {
+			defer wg.Done()
+			remoteResults, remoteErr = runGlobalPingTraceForCompare(ctx, cmd.OutOrStdout(), cfg)
+		}()
+	}
 
 	wg.Wait()
 
 	// Check for errors
-	if localErr != nil && remoteErr != nil {
+	if !cfg.NoLocal && localErr != nil && remoteErr != nil {
 		return fmt.Errorf("both traces failed: local=%v, remote=%v", localErr, remoteErr)
 	}
-
-	// Display comparison if we have at least one result
-	if localResult == nil && len(remoteResults) == 0 {
-		return fmt.Errorf("no trace results available")
+	if cfg.NoLocal && remoteErr != nil {
+		return fmt.Errorf("remote traces failed: %v", remoteErr)
 	}
 
-	// Handle partial results
-	if localResult == nil {
-		fmt.Fprintf(cmd.OutOrStdout(), "\nLocal trace failed: %v\n", localErr)
-		localResult = hop.NewTraceResult(cfg.Target, "")
+	// Build flat list of all sources
+	var sources []*hop.TraceResult
+
+	if !cfg.NoLocal {
+		if localResult == nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nLocal trace failed: %v\n", localErr)
+			localResult = hop.NewTraceResult(cfg.Target, "")
+		}
 		localResult.Source = "Local"
+		sources = append(sources, localResult)
 	}
-	if len(remoteResults) == 0 {
+
+	if len(remoteResults) == 0 && !cfg.NoLocal {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nRemote trace failed: %v\n", remoteErr)
 		placeholder := hop.NewTraceResult(cfg.Target, "")
 		placeholder.Source = cfg.From
-		remoteResults = []*hop.TraceResult{placeholder}
+		sources = append(sources, placeholder)
+	} else {
+		sources = append(sources, remoteResults...)
 	}
 
-	// Set source labels
-	localResult.Source = "Local"
+	if len(sources) == 0 {
+		return fmt.Errorf("no trace results available")
+	}
 
 	fmt.Fprintln(cmd.OutOrStdout())
 
-	// Render comparison for all remotes
 	renderer := display.NewCompareRenderer(cmd.OutOrStdout(), cfg.NoColor)
-	return renderer.RenderAll(localResult, remoteResults)
+	return renderer.RenderAll(sources)
 }
 
 // runLocalTraceForCompare runs a local trace for compare mode (simple output, no TUI).
