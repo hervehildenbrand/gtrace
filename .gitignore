@@ -19,6 +19,9 @@ Thumbs.db
 # MaxMind databases
 *.mmdb
 
+# Claude Code project instructions
+CLAUDE.md
+
 # Private/local files
 specs/
 plans/
