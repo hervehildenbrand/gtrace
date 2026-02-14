@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"net"
 	"testing"
 )
 
@@ -86,41 +87,59 @@ func TestDetectNATFromIPID(t *testing.T) {
 func TestDetectNATFromTTL(t *testing.T) {
 	tests := []struct {
 		name        string
-		expectedTTL int
-		actualTTL   int
+		hopNumber   int
+		responseTTL int
 		expected    bool
 	}{
 		{
-			name:        "TTL matches - no NAT",
-			expectedTTL: 64,
-			actualTTL:   64,
+			name:        "Cisco router at hop 3 (TTL 252) - no NAT",
+			hopNumber:   3,
+			responseTTL: 252,
 			expected:    false,
 		},
 		{
-			name:        "TTL 1 less - normal decrement",
-			expectedTTL: 64,
-			actualTTL:   63,
+			name:        "Linux router at hop 7 (TTL 57) - no NAT",
+			hopNumber:   7,
+			responseTTL: 57,
 			expected:    false,
 		},
 		{
-			name:        "TTL significantly different - possible NAT",
-			expectedTTL: 64,
-			actualTTL:   128,
+			name:        "Windows router at hop 5 (TTL 123) - no NAT",
+			hopNumber:   5,
+			responseTTL: 123,
+			expected:    false,
+		},
+		{
+			name:        "Google router at hop 10 (TTL 245) - no NAT",
+			hopNumber:   10,
+			responseTTL: 245,
+			expected:    false,
+		},
+		{
+			name:        "significant mismatch - possible NAT",
+			hopNumber:   3,
+			responseTTL: 117,
 			expected:    true,
 		},
 		{
-			name:        "TTL from different OS default",
-			expectedTTL: 64,
-			actualTTL:   255,
-			expected:    true,
+			name:        "zero response TTL - no NAT",
+			hopNumber:   5,
+			responseTTL: 0,
+			expected:    false,
+		},
+		{
+			name:        "zero hop number - no NAT",
+			hopNumber:   0,
+			responseTTL: 64,
+			expected:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := DetectNATFromTTL(tt.expectedTTL, tt.actualTTL); got != tt.expected {
+			if got := DetectNATFromTTL(tt.hopNumber, tt.responseTTL); got != tt.expected {
 				t.Errorf("DetectNATFromTTL(%d, %d) = %v, want %v",
-					tt.expectedTTL, tt.actualTTL, got, tt.expected)
+					tt.hopNumber, tt.responseTTL, got, tt.expected)
 			}
 		})
 	}
@@ -203,5 +222,107 @@ func TestCommonTTLDefaults(t *testing.T) {
 	}
 	if !found255 {
 		t.Error("missing TTL 255 (Cisco/Solaris default)")
+	}
+}
+
+func TestInferInitialTTL(t *testing.T) {
+	tests := []struct {
+		name        string
+		observedTTL int
+		expected    int
+	}{
+		{"zero", 0, 0},
+		{"1 rounds to 32", 1, 32},
+		{"32 stays 32", 32, 32},
+		{"33 rounds to 64", 33, 64},
+		{"64 stays 64", 64, 64},
+		{"65 rounds to 128", 65, 128},
+		{"128 stays 128", 128, 128},
+		{"129 rounds to 255", 129, 255},
+		{"255 stays 255", 255, 255},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := InferInitialTTL(tt.observedTTL); got != tt.expected {
+				t.Errorf("InferInitialTTL(%d) = %d, want %d", tt.observedTTL, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsCGNATAddress(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		expected bool
+	}{
+		{"CGNAT address", "100.64.0.1", true},
+		{"CGNAT upper bound", "100.127.255.255", true},
+		{"above CGNAT range", "100.128.0.0", false},
+		{"private 10.x not CGNAT", "10.0.0.1", false},
+		{"public IP", "8.8.8.8", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if got := IsCGNATAddress(ip); got != tt.expected {
+				t.Errorf("IsCGNATAddress(%s) = %v, want %v", tt.ip, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsPrivateAddress(t *testing.T) {
+	tests := []struct {
+		name     string
+		ip       string
+		expected bool
+	}{
+		{"10.0.0.1 is private", "10.0.0.1", true},
+		{"10.255.255.255 is private", "10.255.255.255", true},
+		{"172.16.0.1 is private", "172.16.0.1", true},
+		{"172.31.255.255 is private", "172.31.255.255", true},
+		{"172.32.0.0 not private", "172.32.0.0", false},
+		{"192.168.0.1 is private", "192.168.0.1", true},
+		{"192.168.255.255 is private", "192.168.255.255", true},
+		{"8.8.8.8 not private", "8.8.8.8", false},
+		{"11.0.0.1 not private", "11.0.0.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if got := IsPrivateAddress(ip); got != tt.expected {
+				t.Errorf("IsPrivateAddress(%s) = %v, want %v", tt.ip, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDetectNATFromIP(t *testing.T) {
+	tests := []struct {
+		name      string
+		ip        string
+		hopNumber int
+		expected  bool
+	}{
+		{"CGNAT at any hop", "100.64.0.1", 1, true},
+		{"CGNAT at hop 5", "100.64.0.1", 5, true},
+		{"private at hop 1 - gateway, no flag", "192.168.1.1", 1, false},
+		{"private at hop 2 - NAT detected", "10.0.0.1", 2, true},
+		{"private at hop 3 - NAT detected", "172.16.0.1", 3, true},
+		{"public IP - no NAT", "8.8.8.8", 5, false},
+		{"public IP at hop 1 - no NAT", "1.1.1.1", 1, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if got := DetectNATFromIP(ip, tt.hopNumber); got != tt.expected {
+				t.Errorf("DetectNATFromIP(%s, %d) = %v, want %v", tt.ip, tt.hopNumber, got, tt.expected)
+			}
+		})
 	}
 }
