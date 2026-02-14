@@ -97,15 +97,19 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 			}
 		}
 
-		// NAT detection via TTL analysis
+		// NAT detection: IP-based (Tier 1) and TTL-based (Tier 2)
 		if t.config.DetectNAT {
 			for _, p := range h.Probes {
-				if !p.Timeout && p.ResponseTTL > 0 {
-					expectedTTL := 64 - ttl // Assume common Linux/macOS default
-					if DetectNATFromTTL(expectedTTL, p.ResponseTTL) {
-						h.NAT = true
-						break
-					}
+				if p.Timeout || p.IP == nil {
+					continue
+				}
+				if DetectNATFromIP(p.IP, ttl) {
+					h.NAT = true
+					break
+				}
+				if p.ResponseTTL > 0 && DetectNATFromTTL(ttl, p.ResponseTTL) {
+					h.NAT = true
+					break
 				}
 			}
 		}
