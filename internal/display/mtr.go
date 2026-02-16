@@ -62,6 +62,7 @@ type MTRModel struct {
 	height      int
 	displayMode DisplayMode // Toggle between hostname/IP display
 	isIPv6      bool        // Track if target is IPv6 for column sizing
+	resetChan   chan<- struct{}
 }
 
 // NewMTRModel creates a new MTR model.
@@ -110,7 +111,14 @@ func (m *MTRModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.maxTTL = 0
 			m.cycles = 0
 			m.startTime = time.Now()
+			resetChan := m.resetChan
 			m.mu.Unlock()
+			if resetChan != nil {
+				select {
+				case resetChan <- struct{}{}:
+				default:
+				}
+			}
 		case "n":
 			// Toggle display mode (like real mtr)
 			m.mu.Lock()
@@ -563,8 +571,9 @@ func (m *MTRModel) IsPaused() bool {
 }
 
 // RunMTR runs the MTR TUI program.
-func RunMTR(target, targetIP string, resultChan <-chan ProbeResultMsg, cycleChan <-chan CycleCompleteMsg, doneChan <-chan struct{}) error {
+func RunMTR(target, targetIP string, resultChan <-chan ProbeResultMsg, cycleChan <-chan CycleCompleteMsg, doneChan <-chan struct{}, resetChan chan<- struct{}) error {
 	model := NewMTRModel(target, targetIP)
+	model.resetChan = resetChan
 
 	p := tea.NewProgram(model)
 

@@ -415,6 +415,7 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 	resultChan := make(chan display.ProbeResultMsg, 100)
 	cycleChan := make(chan display.CycleCompleteMsg, 10)
 	doneChan := make(chan struct{})
+	resetChan := make(chan struct{}, 1)
 
 	// Track enriched IPs to avoid re-enriching
 	enrichedIPs := make(map[string]bool)
@@ -426,6 +427,15 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 		defer close(cycleChan)
 
 		probeCallback := func(pr trace.ProbeResult) {
+			// Drain reset signal if present
+			select {
+			case <-resetChan:
+				enrichMu.Lock()
+				enrichedIPs = make(map[string]bool)
+				enrichMu.Unlock()
+			default:
+			}
+
 			msg := display.ProbeResultMsg{
 				TTL:     pr.TTL,
 				IP:      pr.IP,
@@ -476,7 +486,7 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 	}()
 
 	// Run MTR TUI (blocks until user quits)
-	if err := display.RunMTR(cfg.Target, targetIP.String(), resultChan, cycleChan, doneChan); err != nil {
+	if err := display.RunMTR(cfg.Target, targetIP.String(), resultChan, cycleChan, doneChan, resetChan); err != nil {
 		return nil, fmt.Errorf("TUI error: %w", err)
 	}
 
