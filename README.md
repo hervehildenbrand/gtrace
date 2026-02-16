@@ -51,9 +51,16 @@ Download the latest release for your platform from the [Releases page](https://g
 Available for Linux, macOS, and Windows (amd64 and arm64).
 
 ```bash
-# Example: Linux amd64 (replace VERSION with the desired release, e.g. 0.3.3)
-curl -LO https://github.com/hervehildenbrand/gtrace/releases/download/vVERSION/gtrace_VERSION_linux_amd64.tar.gz
-tar xzf gtrace_VERSION_linux_amd64.tar.gz
+# Linux amd64
+VERSION=$(curl -sI https://github.com/hervehildenbrand/gtrace/releases/latest | grep -i location | sed 's/.*tag\/v//' | tr -d '\r')
+curl -LO "https://github.com/hervehildenbrand/gtrace/releases/download/v${VERSION}/gtrace_${VERSION}_linux_amd64.tar.gz"
+tar xzf "gtrace_${VERSION}_linux_amd64.tar.gz"
+sudo mv gtrace /usr/local/bin/
+
+# macOS Apple Silicon
+VERSION=$(curl -sI https://github.com/hervehildenbrand/gtrace/releases/latest | grep -i location | sed 's/.*tag\/v//' | tr -d '\r')
+curl -LO "https://github.com/hervehildenbrand/gtrace/releases/download/v${VERSION}/gtrace_${VERSION}_darwin_arm64.tar.gz"
+tar xzf "gtrace_${VERSION}_darwin_arm64.tar.gz"
 sudo mv gtrace /usr/local/bin/
 ```
 
