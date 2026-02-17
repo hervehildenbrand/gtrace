@@ -61,6 +61,7 @@ type MTRModel struct {
 	width       int
 	height      int
 	displayMode DisplayMode // Toggle between hostname/IP display
+	showECMP    bool        // Toggle ECMP sub-row expansion
 	isIPv6      bool        // Track if target is IPv6 for column sizing
 	resetChan   chan<- struct{}
 }
@@ -123,6 +124,10 @@ func (m *MTRModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle display mode (like real mtr)
 			m.mu.Lock()
 			m.displayMode = (m.displayMode + 1) % 3
+			m.mu.Unlock()
+		case "e":
+			m.mu.Lock()
+			m.showECMP = !m.showECMP
 			m.mu.Unlock()
 		}
 
@@ -245,6 +250,9 @@ func (m *MTRModel) View() string {
 	for _, stats := range orderedStats {
 		b.WriteString(m.formatStatsRow(stats))
 		b.WriteString("\n")
+		if m.showECMP && stats.HasECMP() {
+			b.WriteString(m.formatECMPSubRows(stats))
+		}
 	}
 
 	// Status bar
@@ -273,7 +281,7 @@ func (m *MTRModel) View() string {
 	case DisplayModeBoth:
 		modeStr = "[Both]"
 	}
-	b.WriteString(fmt.Sprintf("%s Press 'n' to toggle DNS/IP, 'p' pause, 'r' reset, 'q' quit", modeStr))
+	b.WriteString(fmt.Sprintf("%s Press 'e' expand ECMP, 'n' DNS/IP, 'p' pause, 'r' reset, 'q' quit", modeStr))
 
 	return b.String()
 }
@@ -483,6 +491,54 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 	}
 
 	return styled
+}
+
+// formatECMPSubRows renders sub-rows for non-primary IPs at an ECMP hop.
+func (m *MTRModel) formatECMPSubRows(stats *HopStats) string {
+	sorted := stats.SortedIPs()
+	if len(sorted) < 2 {
+		return ""
+	}
+
+	// Skip the first entry (primary IP already shown on the main row)
+	secondary := sorted[1:]
+
+	var b strings.Builder
+	indent := strings.Repeat(" ", colHop+1)
+
+	for i, info := range secondary {
+		b.WriteString(indent)
+
+		// Tree connector
+		connector := "├─ "
+		if i == len(secondary)-1 {
+			connector = "└─ "
+		}
+		b.WriteString(hopStyle.Render(connector))
+
+		// IP
+		b.WriteString(ipStyle.Render(info.IP.String()))
+
+		// ASN
+		if info.Enrichment.ASN > 0 {
+			b.WriteString(" ")
+			b.WriteString(asnStyle.Render(fmt.Sprintf("[AS%d]", info.Enrichment.ASN)))
+		}
+
+		// Hostname
+		if info.Enrichment.Hostname != "" {
+			b.WriteString(" ")
+			b.WriteString(hostnameStyle.Render("(" + info.Enrichment.Hostname + ")"))
+		}
+
+		// Probe count
+		b.WriteString(" ")
+		b.WriteString(hopStyle.Render(fmt.Sprintf("×%d", info.Count)))
+
+		b.WriteString("\n")
+	}
+
+	return b.String()
 }
 
 // renderSparkline renders a sparkline graph from RTT history.

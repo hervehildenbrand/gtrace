@@ -3,10 +3,18 @@ package display
 import (
 	"math"
 	"net"
+	"sort"
 	"time"
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
+
+// IPInfo holds a single IP's probe count and enrichment data for ECMP display.
+type IPInfo struct {
+	IP         net.IP
+	Count      int
+	Enrichment hop.Enrichment
+}
 
 // RTTHistorySize is the number of RTT samples to keep for sparkline display.
 const RTTHistorySize = 10
@@ -176,4 +184,33 @@ func (s *HopStats) SetIPEnrichment(ip net.IP, e hop.Enrichment) {
 		s.IPEnrichments[ip.String()] = e
 	}
 	s.Enrichment = e
+}
+
+// SortedIPs returns all IPs seen at this TTL, sorted by probe count descending,
+// then by IP string for stability. Includes enrichment data for each IP.
+func (s *HopStats) SortedIPs() []IPInfo {
+	if len(s.IPCounts) == 0 {
+		return nil
+	}
+
+	result := make([]IPInfo, 0, len(s.IPCounts))
+	for ipStr, count := range s.IPCounts {
+		info := IPInfo{
+			IP:    net.ParseIP(ipStr),
+			Count: count,
+		}
+		if e, ok := s.IPEnrichments[ipStr]; ok {
+			info.Enrichment = e
+		}
+		result = append(result, info)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Count != result[j].Count {
+			return result[i].Count > result[j].Count
+		}
+		return result[i].IP.String() < result[j].IP.String()
+	})
+
+	return result
 }

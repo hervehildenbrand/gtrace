@@ -365,6 +365,74 @@ func TestHopStats_IPEnrichments(t *testing.T) {
 	}
 }
 
+func TestHopStats_SortedIPs_OrderByCount(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("10.0.0.1")
+	ip2 := net.ParseIP("10.0.0.2")
+	ip3 := net.ParseIP("10.0.0.3")
+
+	// ip1 ×5, ip2 ×1, ip3 ×3
+	for i := 0; i < 5; i++ {
+		stats.AddProbe(ip1, 10*time.Millisecond)
+	}
+	stats.AddProbe(ip2, 12*time.Millisecond)
+	for i := 0; i < 3; i++ {
+		stats.AddProbe(ip3, 14*time.Millisecond)
+	}
+
+	sorted := stats.SortedIPs()
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 IPs, got %d", len(sorted))
+	}
+
+	// Descending by count: ip1(5), ip3(3), ip2(1)
+	if !sorted[0].IP.Equal(ip1) || sorted[0].Count != 5 {
+		t.Errorf("expected first IP %v ×5, got %v ×%d", ip1, sorted[0].IP, sorted[0].Count)
+	}
+	if !sorted[1].IP.Equal(ip3) || sorted[1].Count != 3 {
+		t.Errorf("expected second IP %v ×3, got %v ×%d", ip3, sorted[1].IP, sorted[1].Count)
+	}
+	if !sorted[2].IP.Equal(ip2) || sorted[2].Count != 1 {
+		t.Errorf("expected third IP %v ×1, got %v ×%d", ip2, sorted[2].IP, sorted[2].Count)
+	}
+}
+
+func TestHopStats_SortedIPs_IncludesEnrichment(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("10.0.0.1")
+	ip2 := net.ParseIP("10.0.0.2")
+
+	e1 := hop.Enrichment{ASN: 100, Hostname: "router1.example.com"}
+	e2 := hop.Enrichment{ASN: 200, Hostname: "router2.example.com"}
+
+	stats.AddProbe(ip1, 10*time.Millisecond)
+	stats.SetIPEnrichment(ip1, e1)
+	stats.AddProbe(ip2, 12*time.Millisecond)
+	stats.SetIPEnrichment(ip2, e2)
+
+	sorted := stats.SortedIPs()
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 IPs, got %d", len(sorted))
+	}
+
+	// Both have count 1, so order is by IP string (10.0.0.1 < 10.0.0.2)
+	if sorted[0].Enrichment.ASN != 100 {
+		t.Errorf("expected first IP enrichment ASN 100, got %d", sorted[0].Enrichment.ASN)
+	}
+	if sorted[1].Enrichment.ASN != 200 {
+		t.Errorf("expected second IP enrichment ASN 200, got %d", sorted[1].Enrichment.ASN)
+	}
+}
+
+func TestHopStats_SortedIPs_Empty(t *testing.T) {
+	stats := NewHopStats(1)
+
+	sorted := stats.SortedIPs()
+	if len(sorted) != 0 {
+		t.Errorf("expected empty slice, got %d entries", len(sorted))
+	}
+}
+
 func TestHopStats_PrimaryEnrichment_FallsBackToLegacy(t *testing.T) {
 	stats := NewHopStats(1)
 	stats.Enrichment = hop.Enrichment{ASN: 999, Hostname: "legacy.example.com"}
