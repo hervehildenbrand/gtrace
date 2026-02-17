@@ -271,3 +271,203 @@ func TestHopStats_SetMPLS(t *testing.T) {
 		t.Errorf("expected MPLS label 100, got %d", stats.MPLS[0].Label)
 	}
 }
+
+func TestHopStats_HasECMP_SingleIP(t *testing.T) {
+	stats := NewHopStats(1)
+	ip := net.ParseIP("192.168.1.1")
+
+	stats.AddProbe(ip, 10*time.Millisecond)
+	stats.AddProbe(ip, 15*time.Millisecond)
+
+	if stats.HasECMP() {
+		t.Error("expected HasECMP false for single IP")
+	}
+	if stats.UniqueIPCount() != 1 {
+		t.Errorf("expected UniqueIPCount 1, got %d", stats.UniqueIPCount())
+	}
+}
+
+func TestHopStats_HasECMP_MultipleIPs(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("192.168.1.1")
+	ip2 := net.ParseIP("192.168.1.2")
+
+	stats.AddProbe(ip1, 10*time.Millisecond)
+	stats.AddProbe(ip2, 15*time.Millisecond)
+
+	if !stats.HasECMP() {
+		t.Error("expected HasECMP true for two IPs")
+	}
+	if stats.UniqueIPCount() != 2 {
+		t.Errorf("expected UniqueIPCount 2, got %d", stats.UniqueIPCount())
+	}
+}
+
+func TestHopStats_PrimaryIP_MostSeen(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("192.168.1.1")
+	ip2 := net.ParseIP("192.168.1.2")
+
+	// ip1 seen 3 times, ip2 seen 1 time
+	stats.AddProbe(ip1, 10*time.Millisecond)
+	stats.AddProbe(ip1, 12*time.Millisecond)
+	stats.AddProbe(ip2, 15*time.Millisecond)
+	stats.AddProbe(ip1, 11*time.Millisecond)
+
+	primary := stats.PrimaryIP()
+	if !primary.Equal(ip1) {
+		t.Errorf("expected PrimaryIP %v, got %v", ip1, primary)
+	}
+}
+
+func TestHopStats_PrimaryIP_FallsBackToLastIP(t *testing.T) {
+	stats := NewHopStats(1)
+	// Manually set LastIP without using AddProbe (empty IPCounts)
+	stats.LastIP = net.ParseIP("10.0.0.1")
+
+	primary := stats.PrimaryIP()
+	if !primary.Equal(stats.LastIP) {
+		t.Errorf("expected PrimaryIP to fall back to LastIP %v, got %v", stats.LastIP, primary)
+	}
+}
+
+func TestHopStats_IPEnrichments(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("192.168.1.1")
+	ip2 := net.ParseIP("192.168.1.2")
+
+	e1 := hop.Enrichment{ASN: 100, Hostname: "router1.example.com"}
+	e2 := hop.Enrichment{ASN: 200, Hostname: "router2.example.com"}
+
+	stats.AddProbe(ip1, 10*time.Millisecond)
+	stats.SetIPEnrichment(ip1, e1)
+	stats.AddProbe(ip2, 15*time.Millisecond)
+	stats.SetIPEnrichment(ip2, e2)
+
+	// Per-IP enrichments should be stored
+	if got, ok := stats.IPEnrichments[ip1.String()]; !ok || got.ASN != 100 {
+		t.Errorf("expected IP1 enrichment ASN 100, got %v", got)
+	}
+	if got, ok := stats.IPEnrichments[ip2.String()]; !ok || got.ASN != 200 {
+		t.Errorf("expected IP2 enrichment ASN 200, got %v", got)
+	}
+
+	// Legacy field should hold last-set enrichment
+	if stats.Enrichment.ASN != 200 {
+		t.Errorf("expected legacy Enrichment ASN 200, got %d", stats.Enrichment.ASN)
+	}
+
+	// PrimaryEnrichment should return enrichment for the most-seen IP
+	// ip1 and ip2 each seen once — order is nondeterministic, but both are valid
+	pe := stats.PrimaryEnrichment()
+	if pe.ASN != 100 && pe.ASN != 200 {
+		t.Errorf("expected PrimaryEnrichment ASN 100 or 200, got %d", pe.ASN)
+	}
+}
+
+func TestHopStats_SortedIPs_OrderByCount(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("10.0.0.1")
+	ip2 := net.ParseIP("10.0.0.2")
+	ip3 := net.ParseIP("10.0.0.3")
+
+	// ip1 ×5, ip2 ×1, ip3 ×3
+	for i := 0; i < 5; i++ {
+		stats.AddProbe(ip1, 10*time.Millisecond)
+	}
+	stats.AddProbe(ip2, 12*time.Millisecond)
+	for i := 0; i < 3; i++ {
+		stats.AddProbe(ip3, 14*time.Millisecond)
+	}
+
+	sorted := stats.SortedIPs()
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 IPs, got %d", len(sorted))
+	}
+
+	// Descending by count: ip1(5), ip3(3), ip2(1)
+	if !sorted[0].IP.Equal(ip1) || sorted[0].Count != 5 {
+		t.Errorf("expected first IP %v ×5, got %v ×%d", ip1, sorted[0].IP, sorted[0].Count)
+	}
+	if !sorted[1].IP.Equal(ip3) || sorted[1].Count != 3 {
+		t.Errorf("expected second IP %v ×3, got %v ×%d", ip3, sorted[1].IP, sorted[1].Count)
+	}
+	if !sorted[2].IP.Equal(ip2) || sorted[2].Count != 1 {
+		t.Errorf("expected third IP %v ×1, got %v ×%d", ip2, sorted[2].IP, sorted[2].Count)
+	}
+}
+
+func TestHopStats_SortedIPs_IncludesEnrichment(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("10.0.0.1")
+	ip2 := net.ParseIP("10.0.0.2")
+
+	e1 := hop.Enrichment{ASN: 100, Hostname: "router1.example.com"}
+	e2 := hop.Enrichment{ASN: 200, Hostname: "router2.example.com"}
+
+	stats.AddProbe(ip1, 10*time.Millisecond)
+	stats.SetIPEnrichment(ip1, e1)
+	stats.AddProbe(ip2, 12*time.Millisecond)
+	stats.SetIPEnrichment(ip2, e2)
+
+	sorted := stats.SortedIPs()
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 IPs, got %d", len(sorted))
+	}
+
+	// Both have count 1, so order is by IP string (10.0.0.1 < 10.0.0.2)
+	if sorted[0].Enrichment.ASN != 100 {
+		t.Errorf("expected first IP enrichment ASN 100, got %d", sorted[0].Enrichment.ASN)
+	}
+	if sorted[1].Enrichment.ASN != 200 {
+		t.Errorf("expected second IP enrichment ASN 200, got %d", sorted[1].Enrichment.ASN)
+	}
+}
+
+func TestHopStats_SortedIPs_Empty(t *testing.T) {
+	stats := NewHopStats(1)
+
+	sorted := stats.SortedIPs()
+	if len(sorted) != 0 {
+		t.Errorf("expected empty slice, got %d entries", len(sorted))
+	}
+}
+
+func TestHopStats_PrimaryEnrichment_FallsBackToLegacy(t *testing.T) {
+	stats := NewHopStats(1)
+	stats.Enrichment = hop.Enrichment{ASN: 999, Hostname: "legacy.example.com"}
+
+	pe := stats.PrimaryEnrichment()
+	if pe.ASN != 999 {
+		t.Errorf("expected PrimaryEnrichment to fall back to legacy ASN 999, got %d", pe.ASN)
+	}
+}
+
+func TestHopStats_Reset_ClearsECMP(t *testing.T) {
+	stats := NewHopStats(1)
+	ip1 := net.ParseIP("192.168.1.1")
+	ip2 := net.ParseIP("192.168.1.2")
+
+	stats.AddProbe(ip1, 10*time.Millisecond)
+	stats.AddProbe(ip2, 15*time.Millisecond)
+	stats.SetIPEnrichment(ip1, hop.Enrichment{ASN: 100})
+
+	if !stats.HasECMP() {
+		t.Fatal("precondition: expected HasECMP true before reset")
+	}
+
+	stats.Reset()
+
+	if stats.HasECMP() {
+		t.Error("expected HasECMP false after reset")
+	}
+	if len(stats.IPCounts) != 0 {
+		t.Errorf("expected empty IPCounts after reset, got %d", len(stats.IPCounts))
+	}
+	if len(stats.IPEnrichments) != 0 {
+		t.Errorf("expected empty IPEnrichments after reset, got %d", len(stats.IPEnrichments))
+	}
+	if stats.TTL != 1 {
+		t.Errorf("expected TTL 1 preserved after reset, got %d", stats.TTL)
+	}
+}
