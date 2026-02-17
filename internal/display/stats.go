@@ -14,24 +14,28 @@ const RTTHistorySize = 10
 // HopStats aggregates statistics for a single TTL across multiple trace cycles.
 // This is used by the MTR-style continuous tracing mode.
 type HopStats struct {
-	TTL        int
-	Sent       int
-	Recv       int
-	LastIP     net.IP
-	BestRTT    time.Duration
-	WorstRTT   time.Duration
-	SumRTT     time.Duration // For calculating avg
-	LastRTT    time.Duration
-	RTTHistory []time.Duration // Ring buffer for sparkline
-	Enrichment hop.Enrichment
-	MPLS       []hop.MPLSLabel
+	TTL           int
+	Sent          int
+	Recv          int
+	LastIP        net.IP
+	BestRTT       time.Duration
+	WorstRTT      time.Duration
+	SumRTT        time.Duration // For calculating avg
+	LastRTT       time.Duration
+	RTTHistory    []time.Duration // Ring buffer for sparkline
+	Enrichment    hop.Enrichment
+	MPLS          []hop.MPLSLabel
+	IPCounts      map[string]int           // IP string -> probe count
+	IPEnrichments map[string]hop.Enrichment // IP string -> enrichment
 }
 
 // NewHopStats creates a new HopStats for the given TTL.
 func NewHopStats(ttl int) *HopStats {
 	return &HopStats{
-		TTL:        ttl,
-		RTTHistory: make([]time.Duration, 0, RTTHistorySize),
+		TTL:           ttl,
+		RTTHistory:    make([]time.Duration, 0, RTTHistorySize),
+		IPCounts:      make(map[string]int),
+		IPEnrichments: make(map[string]hop.Enrichment),
 	}
 }
 
@@ -42,6 +46,10 @@ func (s *HopStats) AddProbe(ip net.IP, rtt time.Duration) {
 	s.LastIP = ip
 	s.LastRTT = rtt
 	s.SumRTT += rtt
+
+	if ip != nil {
+		s.IPCounts[ip.String()]++
+	}
 
 	// Update best/worst
 	if s.BestRTT == 0 || rtt < s.BestRTT {
@@ -105,8 +113,10 @@ func (s *HopStats) StdDev() time.Duration {
 func (s *HopStats) Reset() {
 	ttl := s.TTL
 	*s = HopStats{
-		TTL:        ttl,
-		RTTHistory: make([]time.Duration, 0, RTTHistorySize),
+		TTL:           ttl,
+		RTTHistory:    make([]time.Duration, 0, RTTHistorySize),
+		IPCounts:      make(map[string]int),
+		IPEnrichments: make(map[string]hop.Enrichment),
 	}
 }
 
@@ -118,4 +128,52 @@ func (s *HopStats) SetEnrichment(e hop.Enrichment) {
 // SetMPLS sets the MPLS labels for this hop.
 func (s *HopStats) SetMPLS(labels []hop.MPLSLabel) {
 	s.MPLS = labels
+}
+
+// HasECMP returns true if multiple IPs have responded at this TTL.
+func (s *HopStats) HasECMP() bool {
+	return len(s.IPCounts) > 1
+}
+
+// UniqueIPCount returns the number of distinct IPs seen at this TTL.
+func (s *HopStats) UniqueIPCount() int {
+	return len(s.IPCounts)
+}
+
+// PrimaryIP returns the most-frequently-seen IP for stable display.
+// Falls back to LastIP if IPCounts is empty.
+func (s *HopStats) PrimaryIP() net.IP {
+	if len(s.IPCounts) == 0 {
+		return s.LastIP
+	}
+	var bestIP string
+	var bestCount int
+	for ip, count := range s.IPCounts {
+		if count > bestCount {
+			bestCount = count
+			bestIP = ip
+		}
+	}
+	return net.ParseIP(bestIP)
+}
+
+// PrimaryEnrichment returns the enrichment for the primary (most-seen) IP.
+// Falls back to the legacy Enrichment field if no per-IP enrichment exists.
+func (s *HopStats) PrimaryEnrichment() hop.Enrichment {
+	primary := s.PrimaryIP()
+	if primary != nil {
+		if e, ok := s.IPEnrichments[primary.String()]; ok {
+			return e
+		}
+	}
+	return s.Enrichment
+}
+
+// SetIPEnrichment stores enrichment data for a specific IP and updates the
+// legacy Enrichment field for backward compatibility.
+func (s *HopStats) SetIPEnrichment(ip net.IP, e hop.Enrichment) {
+	if ip != nil {
+		s.IPEnrichments[ip.String()] = e
+	}
+	s.Enrichment = e
 }
