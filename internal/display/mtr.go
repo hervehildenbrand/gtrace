@@ -173,9 +173,9 @@ func (m *MTRModel) handleProbeResult(msg ProbeResultMsg) {
 	} else {
 		stats.AddProbe(msg.IP, msg.RTT)
 
-		// Update enrichment if provided (only on first response)
+		// Update enrichment if provided (only on first response per IP)
 		if msg.Enrichment.ASN != 0 || msg.Enrichment.Hostname != "" {
-			stats.SetEnrichment(msg.Enrichment)
+			stats.SetIPEnrichment(msg.IP, msg.Enrichment)
 		}
 
 		// Update MPLS labels
@@ -378,7 +378,8 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 	colWidth := m.getHostColumnWidth()
 
-	if stats.LastIP == nil {
+	displayIP := stats.PrimaryIP()
+	if displayIP == nil {
 		// Timeout - pad asterisk to full width
 		padded := fmt.Sprintf("%-*s", colWidth, "*")
 		return timeoutStyle.Render(padded)
@@ -388,8 +389,9 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 	var plainParts []string
 	var styledParts []string
 
-	ipStr := stats.LastIP.String()
-	hostname := stats.Enrichment.Hostname
+	enrichment := stats.PrimaryEnrichment()
+	ipStr := displayIP.String()
+	hostname := enrichment.Hostname
 
 	// Determine max hostname length based on display mode and available space
 	maxHostnameLen := 30
@@ -413,8 +415,8 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 		}
 
 		// ASN
-		if stats.Enrichment.ASN > 0 {
-			asnStr := fmt.Sprintf("[AS%d]", stats.Enrichment.ASN)
+		if enrichment.ASN > 0 {
+			asnStr := fmt.Sprintf("[AS%d]", enrichment.ASN)
 			plainParts = append(plainParts, asnStr)
 			styledParts = append(styledParts, asnStyle.Render(asnStr))
 		}
@@ -425,8 +427,8 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 		styledParts = append(styledParts, ipStyle.Render(ipStr))
 
 		// ASN
-		if stats.Enrichment.ASN > 0 {
-			asnStr := fmt.Sprintf("[AS%d]", stats.Enrichment.ASN)
+		if enrichment.ASN > 0 {
+			asnStr := fmt.Sprintf("[AS%d]", enrichment.ASN)
 			plainParts = append(plainParts, asnStr)
 			styledParts = append(styledParts, asnStyle.Render(asnStr))
 		}
@@ -437,8 +439,8 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 		styledParts = append(styledParts, ipStyle.Render(ipStr))
 
 		// ASN
-		if stats.Enrichment.ASN > 0 {
-			asnStr := fmt.Sprintf("[AS%d]", stats.Enrichment.ASN)
+		if enrichment.ASN > 0 {
+			asnStr := fmt.Sprintf("[AS%d]", enrichment.ASN)
 			plainParts = append(plainParts, asnStr)
 			styledParts = append(styledParts, asnStyle.Render(asnStr))
 		}
@@ -453,6 +455,13 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 			plainParts = append(plainParts, hostStr)
 			styledParts = append(styledParts, hostnameStyle.Render(hostStr))
 		}
+	}
+
+	// ECMP indicator
+	if stats.HasECMP() {
+		ecmpStr := fmt.Sprintf("[ECMP:%d]", stats.UniqueIPCount())
+		plainParts = append(plainParts, ecmpStr)
+		styledParts = append(styledParts, asnStyle.Render(ecmpStr))
 	}
 
 	// Calculate plain text length (with spaces between parts)
@@ -519,16 +528,25 @@ func (m *MTRModel) renderStatusBar() string {
 		fmt.Sprintf("Hops: %d", len(m.stats)),
 	}
 
-	// Check for MPLS
+	// Check for MPLS and ECMP
 	hasMPLS := false
+	hasECMP := false
 	for _, stats := range m.stats {
 		if len(stats.MPLS) > 0 {
 			hasMPLS = true
+		}
+		if stats.HasECMP() {
+			hasECMP = true
+		}
+		if hasMPLS && hasECMP {
 			break
 		}
 	}
 	if hasMPLS {
 		parts = append(parts, mplsStyle.Render("MPLS"))
+	}
+	if hasECMP {
+		parts = append(parts, asnStyle.Render("ECMP"))
 	}
 
 	elapsed := time.Since(m.startTime).Round(time.Millisecond)
