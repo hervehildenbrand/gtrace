@@ -451,6 +451,99 @@ func TestMTRModel_NoECMP_SingleIP(t *testing.T) {
 	}
 }
 
+func TestMTRModel_KeyMsg_ToggleECMP(t *testing.T) {
+	model := NewMTRModel("google.com", "8.8.8.8")
+
+	// Initial state: showECMP should be false
+	if model.showECMP {
+		t.Error("expected showECMP false initially")
+	}
+
+	// Press 'e' to enable
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}
+	newModel, _ := model.Update(msg)
+	m := newModel.(*MTRModel)
+
+	if !m.showECMP {
+		t.Error("expected showECMP true after first 'e' press")
+	}
+
+	// Press 'e' again to disable
+	newModel, _ = m.Update(msg)
+	m = newModel.(*MTRModel)
+
+	if m.showECMP {
+		t.Error("expected showECMP false after second 'e' press")
+	}
+}
+
+func TestMTRModel_ECMP_Expand_ShowsSubRows(t *testing.T) {
+	model := NewMTRModel("google.com", "8.8.8.8")
+	ip1 := net.ParseIP("10.0.0.1")
+	ip2 := net.ParseIP("10.0.0.2")
+	ip3 := net.ParseIP("10.0.0.3")
+
+	e1 := hop.Enrichment{ASN: 100, Hostname: "router1.example.com"}
+	e2 := hop.Enrichment{ASN: 100, Hostname: "router2.example.com"}
+	e3 := hop.Enrichment{ASN: 200, Hostname: "router3.example.com"}
+
+	var m tea.Model = model
+	// ip1 ×3 (primary), ip2 ×2, ip3 ×1
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip1, RTT: 10 * time.Millisecond, Enrichment: e1})
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip1, RTT: 11 * time.Millisecond})
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip1, RTT: 12 * time.Millisecond})
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip2, RTT: 15 * time.Millisecond, Enrichment: e2})
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip2, RTT: 16 * time.Millisecond})
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip3, RTT: 20 * time.Millisecond, Enrichment: e3})
+
+	mtr := m.(*MTRModel)
+
+	// Enable ECMP expand
+	mtr.mu.Lock()
+	mtr.showECMP = true
+	mtr.mu.Unlock()
+
+	view := mtr.View()
+
+	// Should contain tree connectors for sub-rows
+	if !containsString(view, "├─") {
+		t.Error("expected '├─' tree connector in expanded ECMP view")
+	}
+	if !containsString(view, "└─") {
+		t.Error("expected '└─' tree connector in expanded ECMP view")
+	}
+
+	// Should show secondary IPs (ip2 and ip3, not ip1 which is the primary on the main row)
+	if !containsString(view, "10.0.0.2") {
+		t.Error("expected secondary IP 10.0.0.2 in expanded ECMP view")
+	}
+	if !containsString(view, "10.0.0.3") {
+		t.Error("expected secondary IP 10.0.0.3 in expanded ECMP view")
+	}
+}
+
+func TestMTRModel_ECMP_Expand_HiddenByDefault(t *testing.T) {
+	model := NewMTRModel("google.com", "8.8.8.8")
+	ip1 := net.ParseIP("10.0.0.1")
+	ip2 := net.ParseIP("10.0.0.2")
+
+	var m tea.Model = model
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip1, RTT: 10 * time.Millisecond})
+	m, _ = m.Update(ProbeResultMsg{TTL: 2, IP: ip2, RTT: 15 * time.Millisecond})
+
+	mtr := m.(*MTRModel)
+
+	// showECMP is false by default
+	view := mtr.View()
+
+	if containsString(view, "├─") {
+		t.Error("expected no '├─' tree connector when ECMP expand is off")
+	}
+	if containsString(view, "└─") {
+		t.Error("expected no '└─' tree connector when ECMP expand is off")
+	}
+}
+
 func TestMTRModel_ECMP_WithEnrichment(t *testing.T) {
 	model := NewMTRModel("google.com", "8.8.8.8")
 	ip1 := net.ParseIP("10.0.0.1")
