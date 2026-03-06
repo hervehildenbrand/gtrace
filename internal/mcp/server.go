@@ -103,7 +103,7 @@ func mtrTool() mcp.Tool {
 
 func globalPingTool() mcp.Tool {
 	return mcp.NewTool("globalping",
-		mcp.WithDescription("Run a traceroute from remote GlobalPing probe locations worldwide. Does not require root privileges. Requires a GlobalPing API key for authenticated access."),
+		mcp.WithDescription("Run a traceroute from remote GlobalPing probe locations worldwide. Does not require root privileges. Works without an API key (rate-limited); provide one via --api-key for higher limits."),
 		mcp.WithString("target",
 			mcp.Required(),
 			mcp.Description("Target hostname or IP address to trace"),
