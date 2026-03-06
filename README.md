@@ -26,6 +26,7 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 | MTR-style continuous mode | Yes | Yes | No |
 | Latency jitter (StdDev) | Yes | Yes | No |
 | JSON/CSV export | Yes | Yes | No |
+| MCP server (AI integration) | Yes | No | No |
 | Built-in self-update | Yes | No | No |
 
 ## Features
@@ -41,6 +42,7 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 - **MTR Mode**: Continuous monitoring with real-time statistics including latency jitter (StdDev)
 - **GlobalPing Integration**: Run traces from 500+ global probe locations
 - **Export Formats**: JSON, CSV, and text output
+- **MCP Server**: Expose all tools to AI assistants (Claude Code, Cursor, etc.) via Model Context Protocol
 
 ## Installation
 
@@ -288,6 +290,59 @@ sudo gtrace 8.8.8.8 --compare --from "Paris,Tokyo"
 
 Each remote location produces its own side-by-side comparison against the local trace, separated by `===`. Column headers show the actual probe location (e.g. "Paris, FR, OVH SAS").
 
+## MCP Server (AI Integration)
+
+gtrace includes a built-in [MCP](https://modelcontextprotocol.io/) server that exposes its tools to AI assistants like Claude Code, Cursor, and other MCP-aware clients.
+
+### Available Tools
+
+| Tool | Description | Needs Root |
+|------|-------------|------------|
+| `traceroute` | Full traceroute with ASN, geo, MPLS enrichment | Yes |
+| `mtr` | MTR report with packet loss and latency stats | Yes |
+| `globalping` | Remote traceroute from worldwide probe locations | No |
+| `asn_lookup` | ASN info for an IP (org, prefix, country) | No |
+| `geo_lookup` | Geolocation for an IP (city, coords, timezone) | No |
+| `reverse_dns` | Reverse DNS hostname lookup | No |
+
+### Setup with Claude Code
+
+```bash
+# Add gtrace as an MCP server (requires sudo for traceroute/mtr)
+claude mcp add gtrace -- sudo gtrace mcp
+
+# Or without sudo (only lookup + globalping tools will work)
+claude mcp add gtrace -- gtrace mcp
+
+# With a GlobalPing API key for higher rate limits
+claude mcp add gtrace -- sudo gtrace mcp --api-key YOUR_KEY
+```
+
+Restart Claude Code after adding. The tools appear as `mcp__gtrace__traceroute`, `mcp__gtrace__asn_lookup`, etc.
+
+### Setup with Other MCP Clients
+
+Add to your MCP client configuration:
+
+```json
+{
+  "gtrace": {
+    "command": "sudo",
+    "args": ["gtrace", "mcp"]
+  }
+}
+```
+
+### Privilege Requirements
+
+- **macOS**: `sudo` is required for traceroute/mtr (raw socket access)
+- **Linux**: Either `sudo` or grant the binary `CAP_NET_RAW`:
+  ```bash
+  sudo setcap cap_net_raw+ep $(which gtrace)
+  gtrace mcp  # no sudo needed
+  ```
+- **Lookup tools** (`asn_lookup`, `geo_lookup`, `reverse_dns`) and **globalping** never need elevated privileges
+
 ## Architecture
 
 ```
@@ -299,6 +354,7 @@ gtrace/
 │   ├── enrich/          # ASN, geo, rDNS enrichment
 │   ├── export/          # JSON, CSV, text exporters
 │   ├── globalping/      # GlobalPing API client
+│   ├── mcp/             # MCP server for AI integration
 │   ├── monitor/         # Route change detection
 │   └── update/          # Auto-update and self-upgrade
 └── pkg/hop/             # Hop data structures
