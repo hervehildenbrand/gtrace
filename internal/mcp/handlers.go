@@ -220,10 +220,6 @@ func (h *handlers) handleGlobalPing(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	if h.apiKey == "" {
-		return mcp.NewToolResultError("GlobalPing requires an API key. Start the server with --api-key or set GLOBALPING_API_KEY."), nil
-	}
-
 	locations := globalping.ParseLocationStrings(from)
 	if len(locations) == 0 {
 		return mcp.NewToolResultError("no valid locations provided"), nil

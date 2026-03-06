@@ -172,14 +172,13 @@ func TestHandleReverseDNS_InvalidIP(t *testing.T) {
 	}
 }
 
-func TestHandleGlobalPing_MissingAPIKey(t *testing.T) {
-	h := &handlers{apiKey: ""}
+func TestHandleGlobalPing_MissingFrom(t *testing.T) {
+	h := &handlers{}
 	ctx := context.Background()
 
 	req := mcplib.CallToolRequest{}
 	req.Params.Arguments = map[string]any{
 		"target": "example.com",
-		"from":   "Paris",
 	}
 
 	result, err := h.handleGlobalPing(ctx, req)
@@ -188,7 +187,7 @@ func TestHandleGlobalPing_MissingAPIKey(t *testing.T) {
 	}
 
 	if !result.IsError {
-		t.Error("expected error when API key is missing")
+		t.Error("expected error when 'from' is missing")
 	}
 }
 
