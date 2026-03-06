@@ -27,7 +27,7 @@ func NewServer(version, apiKey string) *server.MCPServer {
 
 func tracerouteTool() mcp.Tool {
 	return mcp.NewTool("traceroute",
-		mcp.WithDescription("Run a traceroute to a target host. Shows the network path with IP addresses, hostnames, ASN info, latency, and geolocation for each hop. Requires root/sudo privileges."),
+		mcp.WithDescription("Run a traceroute to a target host. Shows the network path with IP addresses, hostnames, ASN info, latency, and geolocation for each hop. Requires root/sudo on macOS; root or CAP_NET_RAW on Linux."),
 		mcp.WithString("target",
 			mcp.Required(),
 			mcp.Description("Target hostname or IP address to trace"),
@@ -71,7 +71,7 @@ func tracerouteTool() mcp.Tool {
 
 func mtrTool() mcp.Tool {
 	return mcp.NewTool("mtr",
-		mcp.WithDescription("Run an MTR (My Traceroute) report to a target host. Combines traceroute and ping to show packet loss and latency statistics over multiple cycles. Requires root/sudo privileges."),
+		mcp.WithDescription("Run an MTR (My Traceroute) report to a target host. Combines traceroute and ping to show packet loss and latency statistics over multiple cycles. Requires root/sudo on macOS; root or CAP_NET_RAW on Linux."),
 		mcp.WithString("target",
 			mcp.Required(),
 			mcp.Description("Target hostname or IP address"),
@@ -133,7 +133,7 @@ func globalPingTool() mcp.Tool {
 
 func asnLookupTool() mcp.Tool {
 	return mcp.NewTool("asn_lookup",
-		mcp.WithDescription("Look up ASN (Autonomous System Number) information for an IP address. Returns ASN, organization name, country, prefix, and registry."),
+		mcp.WithDescription("Look up ASN (Autonomous System Number) information for an IP address. Returns ASN, organization name, country, prefix, and registry. No special privileges required."),
 		mcp.WithString("ip",
 			mcp.Required(),
 			mcp.Description("IP address to look up (IPv4 or IPv6)"),
@@ -143,7 +143,7 @@ func asnLookupTool() mcp.Tool {
 
 func geoLookupTool() mcp.Tool {
 	return mcp.NewTool("geo_lookup",
-		mcp.WithDescription("Look up geolocation information for an IP address. Returns city, country, region, coordinates, and timezone."),
+		mcp.WithDescription("Look up geolocation information for an IP address. Returns city, country, region, coordinates, and timezone. No special privileges required."),
 		mcp.WithString("ip",
 			mcp.Required(),
 			mcp.Description("IP address to look up (IPv4 or IPv6)"),
@@ -153,7 +153,7 @@ func geoLookupTool() mcp.Tool {
 
 func reverseDNSTool() mcp.Tool {
 	return mcp.NewTool("reverse_dns",
-		mcp.WithDescription("Perform a reverse DNS lookup for an IP address. Returns the hostname associated with the IP."),
+		mcp.WithDescription("Perform a reverse DNS lookup for an IP address. Returns the hostname associated with the IP. No special privileges required."),
 		mcp.WithString("ip",
 			mcp.Required(),
 			mcp.Description("IP address to look up (IPv4 or IPv6)"),

@@ -16,7 +16,15 @@ func NewMCPCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Start MCP server over stdio",
-		Long:  "Starts an MCP (Model Context Protocol) server over stdio, exposing gtrace tools for use by AI assistants and MCP-aware clients.",
+		Long: `Starts an MCP (Model Context Protocol) server over stdio, exposing gtrace
+tools for use by AI assistants and MCP-aware clients.
+
+Privilege requirements:
+  - traceroute, mtr: require root/sudo on macOS, root or CAP_NET_RAW on Linux
+  - globalping, asn_lookup, geo_lookup, reverse_dns: no special privileges
+
+To use all tools, run: sudo gtrace mcp
+On Linux, alternatively: sudo setcap cap_net_raw+ep $(which gtrace) && gtrace mcp`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Fall back to environment variable
 			if apiKey == "" {
