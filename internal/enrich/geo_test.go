@@ -1,7 +1,11 @@
 package enrich
 
 import (
+	"context"
+	"encoding/json"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -172,5 +176,73 @@ func TestGeoDBPath(t *testing.T) {
 	path := DefaultGeoDBPath()
 	if path == "" {
 		t.Error("DefaultGeoDBPath() returned empty string")
+	}
+}
+
+func TestGeoLookup_APIFallback(t *testing.T) {
+	// Mock ip-api.com server
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":      "success",
+			"city":        "Ashburn",
+			"country":     "United States",
+			"countryCode": "US",
+			"regionName":  "Virginia",
+			"lat":         39.03,
+			"lon":         -77.5,
+			"timezone":    "America/New_York",
+		})
+	}))
+	defer srv.Close()
+
+	lookup := NewGeoLookupWithDB("") // No database
+	lookup.apiBaseURL = srv.URL
+
+	result, err := lookup.Lookup(context.Background(), net.ParseIP("8.8.8.8"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.City != "Ashburn" {
+		t.Errorf("City = %q, want %q", result.City, "Ashburn")
+	}
+	if result.Country != "US" {
+		t.Errorf("Country = %q, want %q", result.Country, "US")
+	}
+	if result.CountryName != "United States" {
+		t.Errorf("CountryName = %q, want %q", result.CountryName, "United States")
+	}
+	if result.Region != "Virginia" {
+		t.Errorf("Region = %q, want %q", result.Region, "Virginia")
+	}
+	if result.Latitude != 39.03 {
+		t.Errorf("Latitude = %v, want %v", result.Latitude, 39.03)
+	}
+	if result.Longitude != -77.5 {
+		t.Errorf("Longitude = %v, want %v", result.Longitude, -77.5)
+	}
+	if result.Timezone != "America/New_York" {
+		t.Errorf("Timezone = %q, want %q", result.Timezone, "America/New_York")
+	}
+}
+
+func TestGeoLookup_APIFallback_Failure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "fail",
+			"message": "reserved range",
+		})
+	}))
+	defer srv.Close()
+
+	lookup := NewGeoLookupWithDB("")
+	lookup.apiBaseURL = srv.URL
+
+	result, err := lookup.Lookup(context.Background(), net.ParseIP("8.8.8.8"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should return empty result on API failure, not error
+	if !result.IsEmpty() {
+		t.Errorf("expected empty result on API failure, got %+v", result)
 	}
 }
