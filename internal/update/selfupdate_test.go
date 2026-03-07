@@ -90,9 +90,6 @@ func TestDownloadAsset_ServerError(t *testing.T) {
 
 func TestExtractBinary_TarGz(t *testing.T) {
 	binaryName := "gtrace"
-	if runtime.GOOS == "windows" {
-		binaryName = "gtrace.exe"
-	}
 	binaryContent := []byte("#!/bin/sh\necho hello")
 	archive := createTarGz(t, map[string][]byte{
 		binaryName: binaryContent,
@@ -136,9 +133,6 @@ func TestExtractBinary_TarGz_MissingBinary(t *testing.T) {
 
 func TestExtractBinary_Zip(t *testing.T) {
 	binaryName := "gtrace"
-	if runtime.GOOS == "windows" {
-		binaryName = "gtrace.exe"
-	}
 	binaryContent := []byte("MZ fake exe content")
 	archive := createZip(t, map[string][]byte{
 		binaryName: binaryContent,
@@ -239,24 +233,14 @@ func TestSelfUpdate_EndToEnd(t *testing.T) {
 	// Create a fake binary to replace
 	tmpDir := t.TempDir()
 	oldBinary := filepath.Join(tmpDir, "gtrace")
-	if runtime.GOOS == "windows" {
-		oldBinary += ".exe"
-	}
 	if err := os.WriteFile(oldBinary, []byte("old-version"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create archive with new binary
 	newContent := []byte("new-version-binary")
-	var archive []byte
-	var assetName string
-	if runtime.GOOS == "windows" {
-		archive = createZip(t, map[string][]byte{"gtrace.exe": newContent})
-		assetName = "gtrace_1.0.0_windows_amd64.zip"
-	} else {
-		archive = createTarGz(t, map[string][]byte{"gtrace": newContent})
-		assetName = "gtrace_1.0.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
-	}
+	archive := createTarGz(t, map[string][]byte{"gtrace": newContent})
+	assetName := "gtrace_1.0.0_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write(archive)

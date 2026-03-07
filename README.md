@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hervehildenbrand/gtrace)](https://goreportcard.com/report/github.com/hervehildenbrand/gtrace)
 [![Release](https://img.shields.io/github/v/release/hervehildenbrand/gtrace?include_prereleases)](https://github.com/hervehildenbrand/gtrace/releases)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](https://github.com/hervehildenbrand/gtrace/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)](https://github.com/hervehildenbrand/gtrace/releases)
 
 Advanced network path analysis tool combining local traceroute with GlobalPing's distributed probe network.
 
@@ -50,7 +50,7 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 
 Download the latest release for your platform from the [Releases page](https://github.com/hervehildenbrand/gtrace/releases).
 
-Available for Linux, macOS, and Windows (amd64 and arm64).
+Available for Linux and macOS (amd64 and arm64).
 
 ```bash
 # Linux amd64
