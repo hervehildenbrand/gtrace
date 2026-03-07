@@ -18,15 +18,23 @@ func replaceBinary(oldPath, newPath string) error {
 	}
 
 	// Fallback: copy across filesystems.
+	// Remove the old binary first to avoid "text file busy" (ETXTBSY)
+	// on Linux when the binary is currently executing. Unlinking a
+	// running binary is safe — the kernel keeps the inode until the
+	// process exits.
 	src, err := os.Open(newPath)
 	if err != nil {
 		return fmt.Errorf("open new binary: %w", err)
 	}
 	defer src.Close()
 
-	dst, err := os.OpenFile(oldPath, os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err := os.Remove(oldPath); err != nil {
+		return fmt.Errorf("remove old binary: %w", err)
+	}
+
+	dst, err := os.OpenFile(oldPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
 	if err != nil {
-		return fmt.Errorf("open old binary for write: %w", err)
+		return fmt.Errorf("create new binary: %w", err)
 	}
 	defer dst.Close()
 
