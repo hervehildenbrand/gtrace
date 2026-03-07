@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -95,9 +94,6 @@ func extractFromTarGz(archivePath string) (string, error) {
 	tr := tar.NewReader(gr)
 
 	binaryName := "gtrace"
-	if runtime.GOOS == "windows" {
-		binaryName = "gtrace.exe"
-	}
 
 	for {
 		hdr, err := tr.Next()
@@ -144,9 +140,6 @@ func extractFromZip(archivePath string) (string, error) {
 	defer r.Close()
 
 	binaryName := "gtrace"
-	if runtime.GOOS == "windows" {
-		binaryName = "gtrace.exe"
-	}
 
 	for _, f := range r.File {
 		name := filepath.Base(f.Name)

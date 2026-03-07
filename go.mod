@@ -9,7 +9,6 @@ require (
 	github.com/mark3labs/mcp-go v0.44.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/net v0.49.0
-	golang.org/x/sys v0.40.0
 	golang.org/x/term v0.39.0
 )
 
@@ -42,6 +41,7 @@ require (
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
