@@ -3,10 +3,14 @@ package enrich
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // GeoResult contains the result of a GeoIP lookup.
@@ -39,22 +43,27 @@ func (g GeoResult) IsEmpty() bool {
 	return g.City == "" && g.Country == "" && g.Region == ""
 }
 
+const defaultGeoAPIBaseURL = "http://ip-api.com"
+
 // GeoLookup performs GeoIP lookups.
 type GeoLookup struct {
-	dbPath string // Path to MaxMind database file (optional)
+	dbPath     string // Path to MaxMind database file (optional)
+	apiBaseURL string // Base URL for ip-api.com (overridable for testing)
 }
 
 // NewGeoLookup creates a new GeoIP lookup instance.
 func NewGeoLookup() *GeoLookup {
 	return &GeoLookup{
-		dbPath: DefaultGeoDBPath(),
+		dbPath:     DefaultGeoDBPath(),
+		apiBaseURL: defaultGeoAPIBaseURL,
 	}
 }
 
 // NewGeoLookupWithDB creates a GeoIP lookup with a specific database path.
 func NewGeoLookupWithDB(dbPath string) *GeoLookup {
 	return &GeoLookup{
-		dbPath: dbPath,
+		dbPath:     dbPath,
+		apiBaseURL: defaultGeoAPIBaseURL,
 	}
 }
 
@@ -80,19 +89,66 @@ func (l *GeoLookup) Lookup(ctx context.Context, ip net.IP) (*GeoResult, error) {
 		}
 	}
 
-	// For now, return empty result (API lookup would go here)
-	// This keeps the tool functional without requiring external dependencies
+	// Fallback to ip-api.com
+	result, err := l.lookupAPI(ctx, ip)
+	if err == nil && result != nil && !result.IsEmpty() {
+		return result, nil
+	}
+
 	return &GeoResult{}, nil
 }
 
+// geoAPIResponse represents the response from ip-api.com.
+type geoAPIResponse struct {
+	Status      string  `json:"status"`
+	City        string  `json:"city"`
+	Country     string  `json:"country"`
+	CountryCode string  `json:"countryCode"`
+	RegionName  string  `json:"regionName"`
+	Lat         float64 `json:"lat"`
+	Lon         float64 `json:"lon"`
+	Timezone    string  `json:"timezone"`
+}
+
+// lookupAPI performs geo lookup via ip-api.com.
+func (l *GeoLookup) lookupAPI(ctx context.Context, ip net.IP) (*GeoResult, error) {
+	url := fmt.Sprintf("%s/json/%s?fields=status,city,country,countryCode,regionName,lat,lon,timezone", l.apiBaseURL, ip.String())
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp geoAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Status != "success" {
+		return nil, errors.New("ip-api geo lookup failed")
+	}
+
+	return &GeoResult{
+		City:        apiResp.City,
+		Country:     apiResp.CountryCode,
+		CountryName: apiResp.Country,
+		Region:      apiResp.RegionName,
+		Latitude:    apiResp.Lat,
+		Longitude:   apiResp.Lon,
+		Timezone:    apiResp.Timezone,
+	}, nil
+}
+
 // lookupFromDB looks up IP in MaxMind database.
-// Note: Requires github.com/oschwald/maxminddb-golang for full implementation
 func (l *GeoLookup) lookupFromDB(ip net.IP) (*GeoResult, error) {
 	// Placeholder for MaxMind database lookup
-	// Full implementation requires:
-	// 1. Opening the .mmdb file
-	// 2. Looking up the IP
-	// 3. Parsing the response into GeoResult
 	return nil, errors.New("database lookup not implemented")
 }
 
