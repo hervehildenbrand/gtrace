@@ -156,7 +156,7 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 
 	// Initiate TCP connection (will send SYN)
 	err = connectSocket(fd, sa)
-	// Connect will return EINPROGRESS (Unix) or WSAEWOULDBLOCK (Windows) for non-blocking socket
+	// Connect will return EINPROGRESS for non-blocking socket
 	if err != nil && !isErrInProgress(err) {
 		// Check if we got a connection refused (RST) - means target reached
 		if isErrConnRefused(err) {
@@ -164,11 +164,7 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		}
 	}
 
-	// Set read deadline on ICMP socket
 	deadline := start.Add(t.config.Timeout)
-	if err := icmpConn.SetReadDeadline(deadline); err != nil {
-		return nil, fmt.Errorf("failed to set deadline: %w", err)
-	}
 
 	// Protocol number for parsing ICMP messages
 	protoNum := ICMPProtocolNum(target)
@@ -179,12 +175,30 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		_ = icmpConn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
 	}
 
-	// Wait for ICMP response or TCP connection
+	// Wait for ICMP response or TCP connection.
+	// Use short ICMP read intervals so we can poll the TCP socket
+	// between reads. Without this, SYN-ACK detection would be delayed
+	// until the full ICMP timeout expires.
+	const icmpPollInterval = 5 * time.Millisecond
+
 	reply := make([]byte, 1500)
 	for {
 		// Check if TCP connection completed (SYN-ACK received)
 		if t.checkTCPConnection(fd) {
 			return &probeResult{IP: target, RTT: time.Since(start)}, nil
+		}
+
+		if time.Now().After(deadline) {
+			return nil, &timeoutError{}
+		}
+
+		// Use a short read deadline so we can poll TCP between ICMP reads
+		icmpDeadline := time.Now().Add(icmpPollInterval)
+		if icmpDeadline.After(deadline) {
+			icmpDeadline = deadline
+		}
+		if err := icmpConn.SetReadDeadline(icmpDeadline); err != nil {
+			return nil, fmt.Errorf("failed to set deadline: %w", err)
 		}
 
 		var n int
@@ -202,11 +216,7 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		}
 		if err != nil {
 			if isTimeout(err) {
-				return nil, err
-			}
-			// Keep trying until deadline
-			if time.Now().After(deadline) {
-				return nil, &timeoutError{}
+				continue // Loop back to check TCP and deadline
 			}
 			continue
 		}
@@ -253,10 +263,6 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 			}
 		}
 
-		// Check deadline
-		if time.Now().After(deadline) {
-			return nil, &timeoutError{}
-		}
 	}
 }
 
