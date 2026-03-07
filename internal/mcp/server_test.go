@@ -319,6 +319,13 @@ func TestFormatMTRStats(t *testing.T) {
 	}
 	stats[2] = s2
 
+	// Hop 3: target with responses (makes hop 2 an intermediate timeout hop)
+	s3 := display.NewHopStats(3)
+	for i := 0; i < 10; i++ {
+		s3.AddProbe(net.ParseIP("8.8.8.8"), time.Duration(i+5)*time.Millisecond)
+	}
+	stats[3] = s3
+
 	result := formatMTRStats(stats, 10, "example.com")
 
 	checks := []string{
@@ -326,7 +333,8 @@ func TestFormatMTRStats(t *testing.T) {
 		"10 cycles",
 		"gw.local",
 		"192.168.1.1",
-		"100.0%",
+		"100.0%", // hop 2 intermediate timeout
+		"8.8.8.8",
 	}
 
 	for _, check := range checks {
@@ -412,6 +420,55 @@ func TestFormatGlobalPingResults(t *testing.T) {
 		if !strings.Contains(output, check) {
 			t.Errorf("result missing %q:\n%s", check, output)
 		}
+	}
+}
+
+func TestFormatMTRStats_TrimsAfterTarget(t *testing.T) {
+	stats := make(map[int]*display.HopStats)
+
+	// Hop 1: gateway with responses
+	s1 := display.NewHopStats(1)
+	for i := 0; i < 5; i++ {
+		s1.AddProbe(net.ParseIP("192.168.1.1"), 2*time.Millisecond)
+	}
+	stats[1] = s1
+
+	// Hop 2: intermediate with responses
+	s2 := display.NewHopStats(2)
+	for i := 0; i < 5; i++ {
+		s2.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	}
+	stats[2] = s2
+
+	// Hop 3: target reached
+	s3 := display.NewHopStats(3)
+	for i := 0; i < 5; i++ {
+		s3.AddProbe(net.ParseIP("8.8.8.8"), 10*time.Millisecond)
+	}
+	stats[3] = s3
+
+	// Hops 4-6: beyond target, all timeouts (should be trimmed)
+	for ttl := 4; ttl <= 6; ttl++ {
+		s := display.NewHopStats(ttl)
+		for i := 0; i < 5; i++ {
+			s.AddTimeout()
+		}
+		stats[ttl] = s
+	}
+
+	result := formatMTRStats(stats, 5, "8.8.8.8")
+
+	// Should show hops 1-3
+	if !strings.Contains(result, "192.168.1.1") {
+		t.Error("expected hop 1 (192.168.1.1) in output")
+	}
+	if !strings.Contains(result, "8.8.8.8") {
+		t.Error("expected hop 3 (8.8.8.8) in output")
+	}
+
+	// Should NOT show hops 4-6 (all timeouts after target)
+	if strings.Contains(result, "???") {
+		t.Errorf("expected trailing timeout hops to be trimmed, got:\n%s", result)
 	}
 }
 

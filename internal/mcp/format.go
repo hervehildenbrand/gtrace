@@ -120,10 +120,11 @@ func formatMTRStats(stats map[int]*display.HopStats, cycles int, target string) 
 	sb.WriteString(strings.Repeat("-", 90))
 	sb.WriteByte('\n')
 
-	// Find max TTL
+	// Find the last TTL that had any successful response.
+	// Trim trailing all-timeout hops (past the target).
 	maxTTL := 0
-	for ttl := range stats {
-		if ttl > maxTTL {
+	for ttl, s := range stats {
+		if s.Recv > 0 && ttl > maxTTL {
 			maxTTL = ttl
 		}
 	}
