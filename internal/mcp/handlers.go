@@ -257,9 +257,15 @@ func (h *handlers) handleGlobalPing(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(fmt.Sprintf("GlobalPing measurement failed: %v", err)), nil
 	}
 
+	protocol := opts.Protocol
+	if protocol == "" {
+		protocol = "ICMP"
+	}
+
 	var probeResults []*globalPingProbeResult
 	for _, pr := range result.Results {
 		tr := pr.ToTraceResult(target)
+		tr.Protocol = protocol
 		probeResults = append(probeResults, &globalPingProbeResult{
 			probe: probeInfo{
 				City:    pr.Probe.City,
