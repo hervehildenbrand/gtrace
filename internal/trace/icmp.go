@@ -76,11 +76,8 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 				continue
 			}
 
-			if t.config.DetectNAT && pr.ResponseTTL > 0 {
-				h.AddProbeWithTTL(pr.IP, pr.RTT, pr.ResponseTTL)
-			} else {
-				h.AddProbe(pr.IP, pr.RTT)
-			}
+			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID}
+			h.Probes = append(h.Probes, probe)
 
 			// Set MPLS labels if discovered (first probe with labels wins)
 			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
@@ -97,8 +94,9 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 			}
 		}
 
-		// NAT detection: IP-based (Tier 1) and TTL-based (Tier 2)
+		// NAT detection: IP-based (Tier 1), TTL-based (Tier 2), IP ID-based (Tier 3)
 		if t.config.DetectNAT {
+			var ipIDs []uint16
 			for _, p := range h.Probes {
 				if p.Timeout || p.IP == nil {
 					continue
@@ -111,6 +109,10 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 					h.NAT = true
 					break
 				}
+				ipIDs = append(ipIDs, p.IPID)
+			}
+			if !h.NAT && DetectNATFromIPID(ipIDs) {
+				h.NAT = true
 			}
 		}
 
@@ -134,8 +136,18 @@ type probeResult struct {
 	IP          net.IP
 	RTT         time.Duration
 	MPLS        []hop.MPLSLabel
-	ResponseTTL int // TTL from response packet (for NAT detection)
-	MTU         int // Discovered MTU from Fragmentation Needed
+	ResponseTTL int    // TTL from response packet (for NAT detection)
+	MTU         int    // Discovered MTU from Fragmentation Needed
+	IPID        uint16 // IP ID from original datagram in ICMP error
+}
+
+// ExtractIPID extracts the IP Identification field from an original IP header
+// contained in an ICMP error response's body.Data. Bytes 4-5 of the IPv4 header.
+func ExtractIPID(data []byte) uint16 {
+	if len(data) < 6 {
+		return 0
+	}
+	return uint16(data[4])<<8 | uint16(data[5])
 }
 
 // sendProbe sends a single ICMP probe and waits for response.
@@ -240,7 +252,8 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 						if n > 8 {
 							mplsLabels = ExtractMPLSFromICMP(reply[8:n])
 						}
-						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL}, nil
+						ipid := ExtractIPID(body.Data)
+						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid}, nil
 					}
 				}
 			}
@@ -262,7 +275,8 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 								mtu = 0
 							}
 						}
-						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu}, nil
+						ipid := ExtractIPID(body.Data)
+						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid}, nil
 					}
 				}
 			}

@@ -82,11 +82,8 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
-			if t.config.DetectNAT && pr.ResponseTTL > 0 {
-				h.AddProbeWithTTL(pr.IP, pr.RTT, pr.ResponseTTL)
-			} else {
-				h.AddProbe(pr.IP, pr.RTT)
-			}
+			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID}
+			h.Probes = append(h.Probes, probe)
 
 			// Set MPLS labels if discovered (first probe with labels wins)
 			if len(pr.MPLS) > 0 && len(h.MPLS) == 0 {
@@ -98,8 +95,9 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 			}
 		}
 
-		// NAT detection: IP-based (Tier 1) and TTL-based (Tier 2)
+		// NAT detection: IP-based (Tier 1), TTL-based (Tier 2), IP ID-based (Tier 3)
 		if t.config.DetectNAT {
+			var ipIDs []uint16
 			for _, p := range h.Probes {
 				if p.Timeout || p.IP == nil {
 					continue
@@ -112,6 +110,10 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 					h.NAT = true
 					break
 				}
+				ipIDs = append(ipIDs, p.IPID)
+			}
+			if !h.NAT && DetectNATFromIPID(ipIDs) {
+				h.NAT = true
 			}
 		}
 
@@ -229,7 +231,8 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 					if n > 8 {
 						mplsLabels = ExtractMPLSFromICMP(reply[8:n])
 					}
-					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL}, nil
+					ipid := ExtractIPID(body.Data)
+					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid}, nil
 				}
 			}
 		}
@@ -246,7 +249,8 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 							mtu = 0
 						}
 					}
-					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu}, nil
+					ipid := ExtractIPID(body.Data)
+					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid}, nil
 				}
 			}
 		}

@@ -12,7 +12,8 @@ type Probe struct {
 	IP          net.IP
 	RTT         time.Duration
 	Timeout     bool
-	ResponseTTL int // TTL from response packet (for NAT detection)
+	ResponseTTL int    // TTL from response packet (for NAT detection)
+	IPID        uint16 // IP ID from original datagram in ICMP error
 }
 
 // MPLSLabel represents an MPLS label from ICMP extensions (RFC 4950).
