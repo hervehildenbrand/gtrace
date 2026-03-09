@@ -15,8 +15,9 @@ type ProbeResult struct {
 	RTT      time.Duration
 	Timeout  bool
 	MPLS     []hop.MPLSLabel
-	ICMPType int
-	ICMPCode int
+	ICMPType    int
+	ICMPCode    int
+	OriginalTTL int
 }
 
 // ProbeCallback is called for each probe result.
@@ -67,8 +68,9 @@ func (ct *ContinuousTracer) Run(ctx context.Context, target net.IP, probeCallbac
 					RTT:      p.RTT,
 					Timeout:  p.Timeout,
 					MPLS:     h.MPLS,
-					ICMPType: p.ICMPType,
-					ICMPCode: p.ICMPCode,
+					ICMPType:    p.ICMPType,
+					ICMPCode:    p.ICMPCode,
+					OriginalTTL: p.OriginalTTL,
 				}
 				if probeCallback != nil {
 					probeCallback(pr)

@@ -40,6 +40,7 @@ type HopStats struct {
 	TransitionCount int                      // Number of IP transitions observed
 	LastICMPType    int                      // Last ICMP type seen (for code reporting)
 	LastICMPCode    int                      // Last ICMP code seen (for code reporting)
+	TTLManipulated  bool                     // Original datagram TTL mismatch detected
 }
 
 // NewHopStats creates a new HopStats for the given TTL.

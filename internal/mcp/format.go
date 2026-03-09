@@ -176,6 +176,11 @@ func formatMTRStats(stats map[int]*display.HopStats, cycles int, target string) 
 			float64(s.StdDev())/float64(time.Millisecond),
 		)
 
+		// TTL manipulation indicator
+		if s.TTLManipulated {
+			sb.WriteString("    [ttl_manipulated: middlebox modified original datagram TTL]\n")
+		}
+
 		// ICMP code indicator
 		if s.LastICMPType == 3 {
 			codeText := icmpCodeText(s.LastICMPCode)

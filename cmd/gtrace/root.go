@@ -442,8 +442,9 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 				RTT:      pr.RTT,
 				Timeout:  pr.Timeout,
 				MPLS:     pr.MPLS,
-				ICMPType: pr.ICMPType,
-				ICMPCode: pr.ICMPCode,
+				ICMPType:    pr.ICMPType,
+				ICMPCode:    pr.ICMPCode,
+				OriginalTTL: pr.OriginalTTL,
 			}
 
 			// Enrich first occurrence of each IP

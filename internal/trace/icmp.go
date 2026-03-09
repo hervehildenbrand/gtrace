@@ -76,7 +76,7 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 				continue
 			}
 
-			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode}
+			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL}
 			h.Probes = append(h.Probes, probe)
 
 			// Set MPLS labels if discovered (first probe with labels wins)
@@ -141,6 +141,7 @@ type probeResult struct {
 	IPID        uint16 // IP ID from original datagram in ICMP error
 	ICMPType    int    // ICMP response message type
 	ICMPCode    int    // ICMP response message code
+	OriginalTTL int    // TTL from original datagram in ICMP error (-1 = not set)
 }
 
 // ExtractIPID extracts the IP Identification field from an original IP header
@@ -255,7 +256,8 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 							mplsLabels = ExtractMPLSFromICMP(reply[8:n])
 						}
 						ipid := ExtractIPID(body.Data)
-						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code}, nil
+						origTTL := ExtractOriginalTTL(body.Data)
+						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
 					}
 				}
 			}
@@ -278,7 +280,8 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 							}
 						}
 						ipid := ExtractIPID(body.Data)
-						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code}, nil
+						origTTL := ExtractOriginalTTL(body.Data)
+						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
 					}
 				}
 			}

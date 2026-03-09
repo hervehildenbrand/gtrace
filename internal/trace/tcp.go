@@ -64,7 +64,7 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
-			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode}
+			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL}
 			h.Probes = append(h.Probes, probe)
 
 			// Set MPLS labels if discovered (first probe with labels wins)
@@ -244,7 +244,8 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 						mplsLabels = ExtractMPLSFromICMP(reply[8:n])
 					}
 					ipid := ExtractIPID(body.Data)
-					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code}, nil
+					origTTL := ExtractOriginalTTL(body.Data)
+					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
 				}
 			}
 		}
@@ -262,7 +263,8 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 						}
 					}
 					ipid := ExtractIPID(body.Data)
-					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code}, nil
+					origTTL := ExtractOriginalTTL(body.Data)
+					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
 				}
 			}
 		}

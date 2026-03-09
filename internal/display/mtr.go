@@ -22,8 +22,9 @@ type ProbeResultMsg struct {
 	Timeout    bool
 	MPLS       []hop.MPLSLabel
 	Enrichment hop.Enrichment
-	ICMPType   int
-	ICMPCode   int
+	ICMPType    int
+	ICMPCode    int
+	OriginalTTL int // -1 = not set
 }
 
 // CycleCompleteMsg is sent when a trace cycle completes.
@@ -185,6 +186,11 @@ func (m *MTRModel) handleProbeResult(msg ProbeResultMsg) {
 		if msg.ICMPType != 0 {
 			stats.LastICMPType = msg.ICMPType
 			stats.LastICMPCode = msg.ICMPCode
+		}
+
+		// Check for TTL manipulation
+		if msg.OriginalTTL >= 0 && msg.OriginalTTL != 0 && msg.OriginalTTL != 1 {
+			stats.TTLManipulated = true
 		}
 
 		// Update enrichment if provided (only on first response per IP)
@@ -375,6 +381,12 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 	// Sparkline
 	if len(stats.RTTHistory) > 0 {
 		b.WriteString(m.renderSparkline(stats.RTTHistory))
+	}
+
+	// TTL manipulation indicator
+	if stats.TTLManipulated {
+		b.WriteString(" ")
+		b.WriteString(timeoutStyle.Render("[^TTL]"))
 	}
 
 	// ICMP code indicator (for Dest Unreachable codes)
