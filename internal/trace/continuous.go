@@ -18,6 +18,7 @@ type ProbeResult struct {
 	ICMPType    int
 	ICMPCode    int
 	OriginalTTL int
+	FlowID      int
 }
 
 // ProbeCallback is called for each probe result.
@@ -71,6 +72,7 @@ func (ct *ContinuousTracer) Run(ctx context.Context, target net.IP, probeCallbac
 					ICMPType:    p.ICMPType,
 					ICMPCode:    p.ICMPCode,
 					OriginalTTL: p.OriginalTTL,
+					FlowID:      p.FlowID,
 				}
 				if probeCallback != nil {
 					probeCallback(pr)

@@ -64,6 +64,59 @@ func GenerateFlowID(probeNum int) uint16 {
 	return uint16(33434 + probeNum*7) // Prime multiplier for better distribution
 }
 
+// ECMPType classifies the type of ECMP load balancing observed.
+type ECMPType int
+
+const (
+	ECMPTypeUnknown   ECMPType = iota // Cannot determine or no ECMP
+	ECMPTypePerFlow                   // Per-flow: same 5-tuple → same path
+	ECMPTypePerPacket                 // Per-packet: same flow hits different paths
+)
+
+// String returns the string representation of the ECMP type.
+func (e ECMPType) String() string {
+	switch e {
+	case ECMPTypePerFlow:
+		return "per_flow"
+	case ECMPTypePerPacket:
+		return "per_packet"
+	default:
+		return "unknown"
+	}
+}
+
+// ClassifyECMP determines whether ECMP load balancing is per-flow or per-packet.
+// flowPaths maps flowID → (IP string → hit count).
+// If any single flow hits multiple IPs, it's per-packet.
+// If different flows each hit a single (but different) IP, it's per-flow.
+func ClassifyECMP(flowPaths map[int]map[string]int) ECMPType {
+	if len(flowPaths) == 0 {
+		return ECMPTypeUnknown
+	}
+
+	// Check if any flow hit multiple IPs
+	for _, ipCounts := range flowPaths {
+		if len(ipCounts) > 1 {
+			return ECMPTypePerPacket
+		}
+	}
+
+	// All flows are consistent (each hits one IP).
+	// Check if different flows hit different IPs → per-flow ECMP
+	allIPs := make(map[string]bool)
+	for _, ipCounts := range flowPaths {
+		for ip := range ipCounts {
+			allIPs[ip] = true
+		}
+	}
+
+	if len(allIPs) > 1 && len(flowPaths) > 1 {
+		return ECMPTypePerFlow
+	}
+
+	return ECMPTypeUnknown
+}
+
 // ECMPProbeConfig holds configuration for ECMP-aware probing.
 type ECMPProbeConfig struct {
 	// FlowsPerHop is the number of different flow IDs to try per hop

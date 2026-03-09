@@ -25,6 +25,7 @@ type ProbeResultMsg struct {
 	ICMPType    int
 	ICMPCode    int
 	OriginalTTL int // -1 = not set
+	FlowID      int // ECMP flow identifier (0 = not tracked)
 }
 
 // CycleCompleteMsg is sent when a trace cycle completes.
@@ -145,6 +146,7 @@ func (m *MTRModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		m.cycles = msg.Cycle
 		m.updateRateLimitFlags()
+		m.updateECMPClassification()
 		m.mu.Unlock()
 
 	case TickMsg:
@@ -191,6 +193,15 @@ func (m *MTRModel) handleProbeResult(msg ProbeResultMsg) {
 		// Check for TTL manipulation
 		if msg.OriginalTTL >= 0 && msg.OriginalTTL != 0 && msg.OriginalTTL != 1 {
 			stats.TTLManipulated = true
+		}
+
+		// Track flow paths for ECMP classification
+		if msg.FlowID > 0 && msg.IP != nil {
+			ipStr := msg.IP.String()
+			if stats.FlowPaths[msg.FlowID] == nil {
+				stats.FlowPaths[msg.FlowID] = make(map[string]int)
+			}
+			stats.FlowPaths[msg.FlowID][ipStr]++
 		}
 
 		// Update enrichment if provided (only on first response per IP)
@@ -507,9 +518,17 @@ func (m *MTRModel) formatHostColumn(stats *HopStats) string {
 		}
 	}
 
-	// ECMP indicator
+	// ECMP indicator with classification
 	if stats.HasECMP() {
-		ecmpStr := fmt.Sprintf("[ECMP:%d]", stats.UniqueIPCount())
+		var ecmpStr string
+		switch stats.ECMPClassified {
+		case "per_flow":
+			ecmpStr = fmt.Sprintf("[ECMP:%d/F]", stats.UniqueIPCount())
+		case "per_packet":
+			ecmpStr = fmt.Sprintf("[ECMP:%d/P]", stats.UniqueIPCount())
+		default:
+			ecmpStr = fmt.Sprintf("[ECMP:%d]", stats.UniqueIPCount())
+		}
 		plainParts = append(plainParts, ecmpStr)
 		styledParts = append(styledParts, asnStyle.Render(ecmpStr))
 	}
@@ -692,6 +711,15 @@ func (m *MTRModel) updateRateLimitFlags() {
 	}
 }
 
+// updateECMPClassification reclassifies ECMP type for all hops. Must be called with lock held.
+func (m *MTRModel) updateECMPClassification() {
+	for _, s := range m.stats {
+		if s.HasECMP() && len(s.FlowPaths) > 0 {
+			s.ECMPClassified = classifyECMP(s.FlowPaths)
+		}
+	}
+}
+
 // getOrderedStatsLocked returns stats ordered by TTL. Must be called with lock held.
 func (m *MTRModel) getOrderedStatsLocked() []*HopStats {
 	result := make([]*HopStats, 0, len(m.stats))
@@ -754,6 +782,33 @@ func RunMTR(target, targetIP string, resultChan <-chan ProbeResultMsg, cycleChan
 
 	_, err := p.Run()
 	return err
+}
+
+// classifyECMP determines whether ECMP load balancing is per-flow or per-packet.
+// Returns "per_flow", "per_packet", or "" (unknown/no data).
+func classifyECMP(flowPaths map[int]map[string]int) string {
+	if len(flowPaths) == 0 {
+		return ""
+	}
+
+	for _, ipCounts := range flowPaths {
+		if len(ipCounts) > 1 {
+			return "per_packet"
+		}
+	}
+
+	allIPs := make(map[string]bool)
+	for _, ipCounts := range flowPaths {
+		for ip := range ipCounts {
+			allIPs[ip] = true
+		}
+	}
+
+	if len(allIPs) > 1 && len(flowPaths) > 1 {
+		return "per_flow"
+	}
+
+	return ""
 }
 
 // icmpCodeIndicator returns a short display indicator for ICMP Dest Unreachable codes.

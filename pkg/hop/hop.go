@@ -17,6 +17,7 @@ type Probe struct {
 	ICMPType    int    // ICMP message type (0 = not set)
 	ICMPCode    int    // ICMP message code (meaningful for Dest Unreachable)
 	OriginalTTL int    // TTL from original datagram in ICMP error (-1 = not set)
+	FlowID      int    // ECMP flow identifier (0 = not tracked)
 }
 
 // MPLSLabel represents an MPLS label from ICMP extensions (RFC 4950).

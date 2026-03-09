@@ -61,6 +61,10 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 
 		for i := 0; i < probeCount; i++ {
 			probeNum++
+			flowID := 0
+			if t.config.ECMPFlows > 0 {
+				flowID = i + 1
+			}
 			pr, err := t.sendProbe(icmpConn, target, ttl, probeNum)
 			if err != nil {
 				if isTimeout(err) {
@@ -82,7 +86,7 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
-			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL}
+			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL, FlowID: flowID}
 			h.Probes = append(h.Probes, probe)
 
 			// Set MPLS labels if discovered (first probe with labels wins)

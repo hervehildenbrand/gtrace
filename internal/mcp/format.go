@@ -219,6 +219,11 @@ func formatMTRStats(stats map[int]*display.HopStats, cycles int, target string) 
 			sb.WriteString("    [rate_limited: likely ICMP rate limiting, not real loss]\n")
 		}
 
+		// ECMP classification
+		if s.ECMPClassified != "" {
+			fmt.Fprintf(&sb, "    [ecmp_type: %s]\n", s.ECMPClassified)
+		}
+
 		// ECMP sub-rows
 		if s.HasECMP() {
 			for _, ipInfo := range s.SortedIPs() {
