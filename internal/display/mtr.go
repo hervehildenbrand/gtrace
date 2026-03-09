@@ -141,6 +141,7 @@ func (m *MTRModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CycleCompleteMsg:
 		m.mu.Lock()
 		m.cycles = msg.Cycle
+		m.updateRateLimitFlags()
 		m.mu.Unlock()
 
 	case TickMsg:
@@ -366,6 +367,12 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 	// Sparkline
 	if len(stats.RTTHistory) > 0 {
 		b.WriteString(m.renderSparkline(stats.RTTHistory))
+	}
+
+	// Rate-limit indicator
+	if stats.RateLimited {
+		b.WriteString(" ")
+		b.WriteString(timeoutStyle.Render("[RL?]"))
 	}
 
 	// MPLS indicator
@@ -609,6 +616,45 @@ func (m *MTRModel) renderStatusBar() string {
 	parts = append(parts, fmt.Sprintf("Time: %v", elapsed))
 
 	return statusStyle.Render(strings.Join(parts, " │ "))
+}
+
+// updateRateLimitFlags recalculates rate-limit detection for all hops. Must be called with lock held.
+func (m *MTRModel) updateRateLimitFlags() {
+	// Find the max TTL with responses
+	maxTTL := 0
+	for ttl, s := range m.stats {
+		if s.Recv > 0 && ttl > maxTTL {
+			maxTTL = ttl
+		}
+	}
+
+	for ttl, s := range m.stats {
+		loss := s.LossPercent()
+		if loss <= 10 {
+			s.RateLimited = false
+			continue
+		}
+
+		// Calculate average downstream loss
+		var downstreamLoss float64
+		var count int
+		for t := ttl + 1; t <= maxTTL; t++ {
+			ds, ok := m.stats[t]
+			if !ok || ds.Recv == 0 {
+				continue
+			}
+			downstreamLoss += ds.LossPercent()
+			count++
+		}
+
+		if count == 0 {
+			s.RateLimited = false
+			continue
+		}
+
+		avgDownstream := downstreamLoss / float64(count)
+		s.RateLimited = (loss - avgDownstream) > 15
+	}
 }
 
 // getOrderedStatsLocked returns stats ordered by TTL. Must be called with lock held.

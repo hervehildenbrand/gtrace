@@ -35,6 +35,7 @@ type HopStats struct {
 	MPLS          []hop.MPLSLabel
 	IPCounts      map[string]int           // IP string -> probe count
 	IPEnrichments map[string]hop.Enrichment // IP string -> enrichment
+	RateLimited   bool                     // Hop is likely rate-limiting ICMP
 }
 
 // NewHopStats creates a new HopStats for the given TTL.
