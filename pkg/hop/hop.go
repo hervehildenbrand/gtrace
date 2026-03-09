@@ -36,6 +36,13 @@ func (m MPLSLabel) String() string {
 	return fmt.Sprintf("L=%d E=%d S=%d TTL=%d", m.Label, m.Exp, s, m.TTL)
 }
 
+// InterfaceInfo contains router interface information from RFC 5837 ICMP extensions.
+type InterfaceInfo struct {
+	Name string // Interface name (e.g., "GigabitEthernet0/1")
+	IP   net.IP // Interface IP address
+	Role string // "incoming" or "outgoing"
+}
+
 // Enrichment contains additional data about a hop (ASN, geo, rDNS).
 type Enrichment struct {
 	ASN      uint32
@@ -48,12 +55,13 @@ type Enrichment struct {
 
 // Hop represents a single hop in a traceroute.
 type Hop struct {
-	TTL        int
-	Probes     []Probe
-	MPLS       []MPLSLabel
-	Enrichment Enrichment
-	MTU        int  // Discovered MTU at this hop
-	NAT        bool // NAT detected at this hop
+	TTL           int
+	Probes        []Probe
+	MPLS          []MPLSLabel
+	Enrichment    Enrichment
+	InterfaceInfo *InterfaceInfo // RFC 5837 interface information (nil if not available)
+	MTU           int            // Discovered MTU at this hop
+	NAT           bool           // NAT detected at this hop
 }
 
 // NewHop creates a new Hop with the given TTL.

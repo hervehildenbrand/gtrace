@@ -103,6 +103,16 @@ func ParseMPLSLabelEntry(data []byte) hop.MPLSLabel {
 // followed by at least 8 bytes of the original datagram.
 // RFC 4884 extensions appear after the original datagram portion.
 func ExtractMPLSFromICMP(icmpData []byte) []hop.MPLSLabel {
+	result := ExtractICMPExtensionsFromData(icmpData)
+	if result == nil {
+		return nil
+	}
+	return result.MPLS
+}
+
+// ExtractICMPExtensionsFromData extracts all ICMP extensions (MPLS + Interface Info)
+// from raw ICMP message data after the header.
+func ExtractICMPExtensionsFromData(icmpData []byte) *ICMPExtensionResult {
 	// Need at least original IP header (20 bytes) + 8 bytes of original payload
 	// + some extension data
 	if len(icmpData) < 128 {
@@ -111,13 +121,10 @@ func ExtractMPLSFromICMP(icmpData []byte) []hop.MPLSLabel {
 	}
 
 	// The extension header starts at a 4-byte boundary after the original packet
-	// Original packet is typically at offset 4 in the ICMP data (after unused field)
-	// Look for extension header starting around byte 128
-
 	// Try to find extension header by looking for version byte
 	for offset := 128; offset < len(icmpData)-minExtensionSize; offset += 4 {
 		if icmpData[offset]&0xF0 == icmpExtVersion {
-			return ParseMPLSExtensions(icmpData[offset:])
+			return ParseICMPExtensions(icmpData[offset:])
 		}
 	}
 

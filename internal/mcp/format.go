@@ -78,6 +78,26 @@ func formatHop(sb *strings.Builder, h *hop.Hop) {
 		fmt.Fprintf(sb, "    MPLS: %s\n", m.String())
 	}
 
+	// Interface Info (RFC 5837)
+	if h.InterfaceInfo != nil {
+		if h.InterfaceInfo.Name != "" {
+			fmt.Fprintf(sb, "    Interface: %s", h.InterfaceInfo.Name)
+			if h.InterfaceInfo.IP != nil {
+				fmt.Fprintf(sb, " (%s)", h.InterfaceInfo.IP)
+			}
+			if h.InterfaceInfo.Role != "" {
+				fmt.Fprintf(sb, " [%s]", h.InterfaceInfo.Role)
+			}
+			sb.WriteByte('\n')
+		} else if h.InterfaceInfo.IP != nil {
+			fmt.Fprintf(sb, "    Interface IP: %s", h.InterfaceInfo.IP)
+			if h.InterfaceInfo.Role != "" {
+				fmt.Fprintf(sb, " [%s]", h.InterfaceInfo.Role)
+			}
+			sb.WriteByte('\n')
+		}
+	}
+
 	// ICMP code (check first non-timeout probe)
 	for _, p := range h.Probes {
 		if !p.Timeout && p.ICMPType == 3 {

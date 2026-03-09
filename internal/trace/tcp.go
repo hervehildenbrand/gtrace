@@ -77,6 +77,11 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				h.MTU = pr.MTU
 			}
 
+			// Set interface info if discovered
+			if pr.InterfaceInfo != nil && h.InterfaceInfo == nil {
+				h.InterfaceInfo = pr.InterfaceInfo
+			}
+
 			if pr.IP.Equal(target) {
 				reached = true
 			}
@@ -238,14 +243,17 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		if isTimeExceeded(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.TimeExceeded); ok {
 				if t.isOurProbeForIP(body.Data, port, target) {
-					// Extract MPLS labels from the raw ICMP data
 					var mplsLabels []hop.MPLSLabel
+					var ifInfo *hop.InterfaceInfo
 					if n > 8 {
-						mplsLabels = ExtractMPLSFromICMP(reply[8:n])
+						if ext := ExtractICMPExtensionsFromData(reply[8:n]); ext != nil {
+							mplsLabels = ext.MPLS
+							ifInfo = ext.InterfaceInfo
+						}
 					}
 					ipid := ExtractIPID(body.Data)
 					origTTL := ExtractOriginalTTL(body.Data)
-					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
+					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL, InterfaceInfo: ifInfo}, nil
 				}
 			}
 		}

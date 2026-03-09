@@ -89,6 +89,11 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 				h.MTU = pr.MTU
 			}
 
+			// Set interface info if discovered (first probe with info wins)
+			if pr.InterfaceInfo != nil && h.InterfaceInfo == nil {
+				h.InterfaceInfo = pr.InterfaceInfo
+			}
+
 			if pr.IP.Equal(target) {
 				reached = true
 			}
@@ -139,9 +144,10 @@ type probeResult struct {
 	ResponseTTL int    // TTL from response packet (for NAT detection)
 	MTU         int    // Discovered MTU from Fragmentation Needed
 	IPID        uint16 // IP ID from original datagram in ICMP error
-	ICMPType    int    // ICMP response message type
-	ICMPCode    int    // ICMP response message code
-	OriginalTTL int    // TTL from original datagram in ICMP error (-1 = not set)
+	ICMPType      int              // ICMP response message type
+	ICMPCode      int              // ICMP response message code
+	OriginalTTL   int              // TTL from original datagram in ICMP error (-1 = not set)
+	InterfaceInfo *hop.InterfaceInfo // RFC 5837 interface info (nil if not available)
 }
 
 // ExtractIPID extracts the IP Identification field from an original IP header
@@ -250,14 +256,18 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 					// Original ICMP ID is at offset ipHdrSize+4 and ipHdrSize+5
 					origID := int(body.Data[ipHdrSize+4])<<8 | int(body.Data[ipHdrSize+5])
 					if origID == t.id {
-						// Extract MPLS labels from the raw ICMP data
+						// Extract ICMP extensions (MPLS + Interface Info)
 						var mplsLabels []hop.MPLSLabel
+						var ifInfo *hop.InterfaceInfo
 						if n > 8 {
-							mplsLabels = ExtractMPLSFromICMP(reply[8:n])
+							if ext := ExtractICMPExtensionsFromData(reply[8:n]); ext != nil {
+								mplsLabels = ext.MPLS
+								ifInfo = ext.InterfaceInfo
+							}
 						}
 						ipid := ExtractIPID(body.Data)
 						origTTL := ExtractOriginalTTL(body.Data)
-						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
+						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL, InterfaceInfo: ifInfo}, nil
 					}
 				}
 			}
