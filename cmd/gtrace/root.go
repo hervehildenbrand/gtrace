@@ -27,6 +27,7 @@ import (
 // Config holds the parsed CLI configuration.
 type Config struct {
 	Target   string
+	Targets  []string // Multiple targets for split-pane MTR
 	From     string
 	Protocol string
 	Port     int
@@ -108,16 +109,21 @@ func NewRootCmd(version string) *cobra.Command {
 		Long: `gtrace combines local traceroute with GlobalPing's distributed probe network,
 featuring advanced diagnostics (MPLS, ECMP, MTU, NAT detection),
 rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
-		Args: cobra.MaximumNArgs(1),
+		Args: cobra.RangeArgs(0, 5),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip validation for special commands
 			if cfg.DBStatus || cfg.DownloadDB {
 				return nil
 			}
 
-			// Require target for normal operation
+			// Require at least one target for normal operation
 			if len(args) == 0 {
 				return fmt.Errorf("requires a target argument")
+			}
+
+			// Validate max targets
+			if len(args) > 5 {
+				return fmt.Errorf("too many targets: %d (maximum 5)", len(args))
 			}
 
 			// Validate protocol
@@ -203,6 +209,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 			}
 
 			cfg.Target = args[0]
+			cfg.Targets = args
 
 			if cfg.DryRun {
 				// Just validate args and return
@@ -377,6 +384,11 @@ func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.T
 		return runLocalTraceSimple(ctx, cmd, cfg, tracer, enricher, targetIP)
 	}
 
+	// Multi-target split-pane MTR
+	if len(cfg.Targets) > 1 {
+		return runLocalTraceMultiMTR(ctx, cmd, cfg, enricher, timeout)
+	}
+
 	// MTR mode is the default for TUI
 	return runLocalTraceMTR(ctx, cmd, cfg, enricher, targetIP, timeout)
 }
@@ -495,6 +507,143 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 	}
 
 	// Return nil result for MTR mode (no single trace result)
+	return nil, nil
+}
+
+// runLocalTraceMultiMTR runs split-pane MTR for multiple targets.
+func runLocalTraceMultiMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enricher enrich.EnricherInterface, timeout time.Duration) (*hop.TraceResult, error) {
+	interval, err := time.ParseDuration(cfg.Interval)
+	if err != nil {
+		return nil, fmt.Errorf("invalid interval: %w", err)
+	}
+
+	// Resolve all targets
+	targets := make([]net.IP, len(cfg.Targets))
+	targetNames := make([]string, len(cfg.Targets))
+	targetIPStrs := make([]string, len(cfg.Targets))
+	for i, t := range cfg.Targets {
+		ip, err := trace.ResolveTarget(t, getAddressFamily(cfg))
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve target %q: %w", t, err)
+		}
+		targets[i] = ip
+		targetNames[i] = t
+		targetIPStrs[i] = ip.String()
+	}
+
+	// Create tracers
+	traceCfg := &trace.Config{
+		Protocol:      trace.Protocol(cfg.Protocol),
+		MaxHops:       cfg.MaxHops,
+		PacketsPerHop: 1,
+		Timeout:       timeout,
+		Port:          cfg.Port,
+		DetectNAT:     cfg.DetectNAT,
+		ECMPFlows:     cfg.ECMPFlows,
+		DiscoverMTU:   cfg.DiscoverMTU,
+		ProbeSize:     cfg.ProbeSize,
+	}
+
+	tracers := make([]trace.Tracer, len(targets))
+	for i := range targets {
+		t, err := trace.NewLocalTracer(traceCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create tracer for %s: %w", cfg.Targets[i], err)
+		}
+		tracers[i] = t
+	}
+
+	// Create channels
+	resultChans := make([]<-chan display.MultiProbeResultMsg, len(targets))
+	cycleChans := make([]<-chan display.MultiCycleCompleteMsg, len(targets))
+	doneChan := make(chan struct{})
+
+	writableResultChans := make([]chan display.MultiProbeResultMsg, len(targets))
+	writableCycleChans := make([]chan display.MultiCycleCompleteMsg, len(targets))
+	for i := range targets {
+		rch := make(chan display.MultiProbeResultMsg, 100)
+		cch := make(chan display.MultiCycleCompleteMsg, 10)
+		writableResultChans[i] = rch
+		writableCycleChans[i] = cch
+		resultChans[i] = rch
+		cycleChans[i] = cch
+	}
+
+	// Track enriched IPs
+	enrichedIPs := make(map[string]bool)
+	var enrichMu sync.Mutex
+
+	// Create multi-tracer
+	mct := trace.NewMultiContinuousTracer(traceCfg, tracers, targets, interval)
+
+	// Run in background
+	go func() {
+		defer func() {
+			for i := range writableResultChans {
+				close(writableResultChans[i])
+				close(writableCycleChans[i])
+			}
+		}()
+
+		probeCallback := func(targetIndex int, pr trace.ProbeResult) {
+			msg := display.MultiProbeResultMsg{
+				TargetIndex: targetIndex,
+				Probe: display.ProbeResultMsg{
+					TTL:         pr.TTL,
+					IP:          pr.IP,
+					RTT:         pr.RTT,
+					Timeout:     pr.Timeout,
+					MPLS:        pr.MPLS,
+					ICMPType:    pr.ICMPType,
+					ICMPCode:    pr.ICMPCode,
+					OriginalTTL: pr.OriginalTTL,
+					FlowID:      pr.FlowID,
+				},
+			}
+
+			// Enrich first occurrence
+			if pr.IP != nil && enricher != nil {
+				ipStr := pr.IP.String()
+				enrichMu.Lock()
+				needsEnrich := !enrichedIPs[ipStr]
+				if needsEnrich {
+					enrichedIPs[ipStr] = true
+				}
+				enrichMu.Unlock()
+
+				if needsEnrich {
+					h := hop.NewHop(pr.TTL)
+					h.AddProbe(pr.IP, pr.RTT)
+					enricher.EnrichHop(ctx, h)
+					msg.Probe.Enrichment = h.Enrichment
+				}
+			}
+
+			select {
+			case writableResultChans[targetIndex] <- msg:
+			case <-ctx.Done():
+			}
+		}
+
+		cycleCallback := func(targetIndex int, cycle int, reached bool) {
+			select {
+			case writableCycleChans[targetIndex] <- display.MultiCycleCompleteMsg{
+				TargetIndex: targetIndex,
+				Cycle:       cycle,
+				Reached:     reached,
+			}:
+			case <-ctx.Done():
+			}
+		}
+
+		mct.Run(ctx, probeCallback, cycleCallback)
+	}()
+
+	// Run split-pane TUI
+	if err := display.RunSplitMTR(targetNames, targetIPStrs, resultChans, cycleChans, doneChan); err != nil {
+		return nil, fmt.Errorf("TUI error: %w", err)
+	}
+
 	return nil, nil
 }
 

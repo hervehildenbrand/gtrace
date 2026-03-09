@@ -877,6 +877,65 @@ func TestRootCommand_NoLocalSkipsLocalPrivilegeCheck(t *testing.T) {
 	}
 }
 
+func TestRootCommand_AcceptsMultipleTargets(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "cloudflare.com", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error for multiple targets: %v", err)
+	}
+}
+
+func TestRootCommand_RejectsMoreThanFiveTargets(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"a.com", "b.com", "c.com", "d.com", "e.com", "f.com", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error for 6 targets")
+	}
+	if !strings.Contains(err.Error(), "5") {
+		t.Errorf("error should mention max 5, got: %v", err)
+	}
+}
+
+func TestRootCommand_MultipleTargetsPopulatesConfig(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "cloudflare.com", "example.com", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRootCommand_SingleTargetStillWorks(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err != nil {
+		t.Errorf("unexpected error for single target: %v", err)
+	}
+}
+
 func TestSetupCmd_UpgradeRegisteredForDevBuild(t *testing.T) {
 	// Simulate what main() does — upgrade must be available even for dev builds
 	cmd := SetupCmd("dev")
