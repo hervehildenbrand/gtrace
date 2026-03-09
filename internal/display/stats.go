@@ -33,9 +33,11 @@ type HopStats struct {
 	RTTHistory    []time.Duration // Ring buffer for sparkline
 	Enrichment    hop.Enrichment
 	MPLS          []hop.MPLSLabel
-	IPCounts      map[string]int           // IP string -> probe count
-	IPEnrichments map[string]hop.Enrichment // IP string -> enrichment
-	RateLimited   bool                     // Hop is likely rate-limiting ICMP
+	IPCounts        map[string]int           // IP string -> probe count
+	IPEnrichments   map[string]hop.Enrichment // IP string -> enrichment
+	RateLimited     bool                     // Hop is likely rate-limiting ICMP
+	IPHistory       []string                 // Bounded ring buffer of IP strings (cap 100)
+	TransitionCount int                      // Number of IP transitions observed
 }
 
 // NewHopStats creates a new HopStats for the given TTL.
@@ -48,6 +50,9 @@ func NewHopStats(ttl int) *HopStats {
 	}
 }
 
+// IPHistorySize is the maximum number of IP entries to keep for route flap detection.
+const IPHistorySize = 100
+
 // AddProbe records a successful probe response.
 func (s *HopStats) AddProbe(ip net.IP, rtt time.Duration) {
 	s.Sent++
@@ -57,7 +62,19 @@ func (s *HopStats) AddProbe(ip net.IP, rtt time.Duration) {
 	s.SumRTT += rtt
 
 	if ip != nil {
-		s.IPCounts[ip.String()]++
+		ipStr := ip.String()
+		s.IPCounts[ipStr]++
+
+		// Track IP transitions for route flap detection
+		if len(s.IPHistory) > 0 && s.IPHistory[len(s.IPHistory)-1] != ipStr {
+			s.TransitionCount++
+		}
+		if len(s.IPHistory) >= IPHistorySize {
+			copy(s.IPHistory, s.IPHistory[1:])
+			s.IPHistory[IPHistorySize-1] = ipStr
+		} else {
+			s.IPHistory = append(s.IPHistory, ipStr)
+		}
 	}
 
 	// Update best/worst
@@ -126,6 +143,7 @@ func (s *HopStats) Reset() {
 		RTTHistory:    make([]time.Duration, 0, RTTHistorySize),
 		IPCounts:      make(map[string]int),
 		IPEnrichments: make(map[string]hop.Enrichment),
+		IPHistory:     make([]string, 0, IPHistorySize),
 	}
 }
 
@@ -137,6 +155,17 @@ func (s *HopStats) SetEnrichment(e hop.Enrichment) {
 // SetMPLS sets the MPLS labels for this hop.
 func (s *HopStats) SetMPLS(labels []hop.MPLSLabel) {
 	s.MPLS = labels
+}
+
+// HasRouteFlap returns true if the hop shows route instability.
+// Requires: transitionRate > 0.2, UniqueIPCount > 2, and Sent > 10.
+// The UniqueIPCount > 2 filter separates flapping from simple ECMP.
+func (s *HopStats) HasRouteFlap() bool {
+	if s.Sent <= 10 || s.UniqueIPCount() <= 2 {
+		return false
+	}
+	transitionRate := float64(s.TransitionCount) / float64(s.Sent)
+	return transitionRate > 0.2
 }
 
 // HasECMP returns true if multiple IPs have responded at this TTL.

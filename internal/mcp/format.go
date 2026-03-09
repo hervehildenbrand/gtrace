@@ -165,6 +165,11 @@ func formatMTRStats(stats map[int]*display.HopStats, cycles int, target string) 
 			float64(s.StdDev())/float64(time.Millisecond),
 		)
 
+		// Route flap indicator
+		if s.HasRouteFlap() {
+			sb.WriteString("    [route_flap: route instability detected]\n")
+		}
+
 		// Rate-limit indicator
 		if s.RateLimited {
 			sb.WriteString("    [rate_limited: likely ICMP rate limiting, not real loss]\n")

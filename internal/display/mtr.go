@@ -369,6 +369,12 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 		b.WriteString(m.renderSparkline(stats.RTTHistory))
 	}
 
+	// Route flap indicator
+	if stats.HasRouteFlap() {
+		b.WriteString(" ")
+		b.WriteString(timeoutStyle.Render("[!]"))
+	}
+
 	// Rate-limit indicator
 	if stats.RateLimited {
 		b.WriteString(" ")
