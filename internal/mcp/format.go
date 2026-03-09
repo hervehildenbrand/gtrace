@@ -78,6 +78,17 @@ func formatHop(sb *strings.Builder, h *hop.Hop) {
 		fmt.Fprintf(sb, "    MPLS: %s\n", m.String())
 	}
 
+	// ICMP code (check first non-timeout probe)
+	for _, p := range h.Probes {
+		if !p.Timeout && p.ICMPType == 3 {
+			codeText := icmpCodeText(p.ICMPCode)
+			if codeText != "" {
+				fmt.Fprintf(sb, "    [ICMP: %s (code %d)]\n", codeText, p.ICMPCode)
+			}
+			break
+		}
+	}
+
 	// NAT
 	if h.NAT {
 		sb.WriteString("    [NAT detected]\n")
@@ -164,6 +175,14 @@ func formatMTRStats(stats map[int]*display.HopStats, cycles int, target string) 
 			float64(s.WorstRTT)/float64(time.Millisecond),
 			float64(s.StdDev())/float64(time.Millisecond),
 		)
+
+		// ICMP code indicator
+		if s.LastICMPType == 3 {
+			codeText := icmpCodeText(s.LastICMPCode)
+			if codeText != "" {
+				fmt.Fprintf(&sb, "    [icmp_code: %d, icmp_code_text: %s]\n", s.LastICMPCode, codeText)
+			}
+		}
 
 		// Route flap indicator
 		if s.HasRouteFlap() {
@@ -257,4 +276,24 @@ func formatGeoResult(result *enrich.GeoResult) string {
 // formatRDNSResult formats a reverse DNS lookup result.
 func formatRDNSResult(ip, hostname string) string {
 	return fmt.Sprintf("IP:       %s\nHostname: %s\n", ip, hostname)
+}
+
+// icmpCodeText returns a human-readable description of an ICMP Dest Unreachable code.
+func icmpCodeText(code int) string {
+	switch code {
+	case 0:
+		return "network unreachable"
+	case 1:
+		return "host unreachable"
+	case 2:
+		return "protocol unreachable"
+	case 3:
+		return "port unreachable"
+	case 4:
+		return "fragmentation needed"
+	case 9, 10, 13:
+		return "admin prohibited"
+	default:
+		return ""
+	}
 }

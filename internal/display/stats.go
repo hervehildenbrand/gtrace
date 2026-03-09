@@ -38,6 +38,8 @@ type HopStats struct {
 	RateLimited     bool                     // Hop is likely rate-limiting ICMP
 	IPHistory       []string                 // Bounded ring buffer of IP strings (cap 100)
 	TransitionCount int                      // Number of IP transitions observed
+	LastICMPType    int                      // Last ICMP type seen (for code reporting)
+	LastICMPCode    int                      // Last ICMP code seen (for code reporting)
 }
 
 // NewHopStats creates a new HopStats for the given TTL.

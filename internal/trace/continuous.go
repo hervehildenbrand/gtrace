@@ -10,11 +10,13 @@ import (
 
 // ProbeResult represents a single probe result for continuous tracing.
 type ProbeResult struct {
-	TTL     int
-	IP      net.IP
-	RTT     time.Duration
-	Timeout bool
-	MPLS    []hop.MPLSLabel
+	TTL      int
+	IP       net.IP
+	RTT      time.Duration
+	Timeout  bool
+	MPLS     []hop.MPLSLabel
+	ICMPType int
+	ICMPCode int
 }
 
 // ProbeCallback is called for each probe result.
@@ -60,11 +62,13 @@ func (ct *ContinuousTracer) Run(ctx context.Context, target net.IP, probeCallbac
 			// Convert hop probes to ProbeResults
 			for _, p := range h.Probes {
 				pr := ProbeResult{
-					TTL:     h.TTL,
-					IP:      p.IP,
-					RTT:     p.RTT,
-					Timeout: p.Timeout,
-					MPLS:    h.MPLS,
+					TTL:      h.TTL,
+					IP:       p.IP,
+					RTT:      p.RTT,
+					Timeout:  p.Timeout,
+					MPLS:     h.MPLS,
+					ICMPType: p.ICMPType,
+					ICMPCode: p.ICMPCode,
 				}
 				if probeCallback != nil {
 					probeCallback(pr)

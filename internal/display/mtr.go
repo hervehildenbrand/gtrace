@@ -22,6 +22,8 @@ type ProbeResultMsg struct {
 	Timeout    bool
 	MPLS       []hop.MPLSLabel
 	Enrichment hop.Enrichment
+	ICMPType   int
+	ICMPCode   int
 }
 
 // CycleCompleteMsg is sent when a trace cycle completes.
@@ -178,6 +180,12 @@ func (m *MTRModel) handleProbeResult(msg ProbeResultMsg) {
 		stats.AddTimeout()
 	} else {
 		stats.AddProbe(msg.IP, msg.RTT)
+
+		// Track ICMP type/code for code reporting
+		if msg.ICMPType != 0 {
+			stats.LastICMPType = msg.ICMPType
+			stats.LastICMPCode = msg.ICMPCode
+		}
 
 		// Update enrichment if provided (only on first response per IP)
 		if msg.Enrichment.ASN != 0 || msg.Enrichment.Hostname != "" {
@@ -367,6 +375,15 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 	// Sparkline
 	if len(stats.RTTHistory) > 0 {
 		b.WriteString(m.renderSparkline(stats.RTTHistory))
+	}
+
+	// ICMP code indicator (for Dest Unreachable codes)
+	if stats.LastICMPType == 3 {
+		indicator := icmpCodeIndicator(stats.LastICMPCode)
+		if indicator != "" {
+			b.WriteString(" ")
+			b.WriteString(timeoutStyle.Render(indicator))
+		}
 	}
 
 	// Route flap indicator
@@ -725,4 +742,22 @@ func RunMTR(target, targetIP string, resultChan <-chan ProbeResultMsg, cycleChan
 
 	_, err := p.Run()
 	return err
+}
+
+// icmpCodeIndicator returns a short display indicator for ICMP Dest Unreachable codes.
+func icmpCodeIndicator(code int) string {
+	switch code {
+	case 0:
+		return "[!N]"
+	case 1:
+		return "[!H]"
+	case 3:
+		return "[!P]"
+	case 4:
+		return "[!F]"
+	case 9, 10, 13:
+		return "[!X]"
+	default:
+		return ""
+	}
 }

@@ -14,6 +14,8 @@ type Probe struct {
 	Timeout     bool
 	ResponseTTL int    // TTL from response packet (for NAT detection)
 	IPID        uint16 // IP ID from original datagram in ICMP error
+	ICMPType    int    // ICMP message type (0 = not set)
+	ICMPCode    int    // ICMP message code (meaningful for Dest Unreachable)
 }
 
 // MPLSLabel represents an MPLS label from ICMP extensions (RFC 4950).
