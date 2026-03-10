@@ -76,6 +76,11 @@ func (r *SimpleRenderer) RenderHop(h *hop.Hop) string {
 			}
 		}
 
+		// ICMP code indicator (Dest Unreachable codes)
+		if indicator := r.icmpCodeIndicator(h); indicator != "" {
+			parts = append(parts, indicator)
+		}
+
 		// NAT indicator
 		if h.NAT {
 			parts = append(parts, "[NAT]")
@@ -118,6 +123,29 @@ func (r *SimpleRenderer) formatProbeRTTs(h *hop.Hop) string {
 		}
 	}
 	return strings.Join(rtts, " ")
+}
+
+// icmpCodeIndicator returns an ICMP code display indicator for a hop.
+// Checks the last responding probe for Dest Unreachable (type 3) codes.
+func (r *SimpleRenderer) icmpCodeIndicator(h *hop.Hop) string {
+	for i := len(h.Probes) - 1; i >= 0; i-- {
+		p := h.Probes[i]
+		if p.ICMPType == 3 {
+			switch p.ICMPCode {
+			case 0:
+				return "[!N]"
+			case 1:
+				return "[!H]"
+			case 3:
+				return "[!P]"
+			case 4:
+				return "[!F]"
+			case 9, 10, 13:
+				return "[!X]"
+			}
+		}
+	}
+	return ""
 }
 
 // RenderTrace renders a complete trace result to the writer.

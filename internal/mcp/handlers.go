@@ -167,6 +167,23 @@ func (h *handlers) handleMTR(ctx context.Context, req mcp.CallToolRequest) (*mcp
 			s.AddTimeout()
 		} else {
 			s.AddProbe(pr.IP, pr.RTT)
+			// Track ICMP type/code for code reporting
+			if pr.ICMPType != 0 {
+				s.LastICMPType = pr.ICMPType
+				s.LastICMPCode = pr.ICMPCode
+			}
+			// Track TTL manipulation
+			if pr.OriginalTTL >= 0 && pr.OriginalTTL != 0 && pr.OriginalTTL != 1 {
+				s.TTLManipulated = true
+			}
+			// Track ECMP flow paths
+			if pr.FlowID > 0 && pr.IP != nil {
+				ipStr := pr.IP.String()
+				if s.FlowPaths[pr.FlowID] == nil {
+					s.FlowPaths[pr.FlowID] = make(map[string]int)
+				}
+				s.FlowPaths[pr.FlowID][ipStr]++
+			}
 		}
 		if len(pr.MPLS) > 0 {
 			s.SetMPLS(pr.MPLS)
@@ -184,6 +201,10 @@ func (h *handlers) handleMTR(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	if err != nil && mtrCtx.Err() == nil {
 		return mcp.NewToolResultError(fmt.Sprintf("MTR failed: %v", err)), nil
 	}
+
+	// Post-process: rate-limit detection and ECMP classification
+	updateMCPRateLimitFlags(stats)
+	updateMCPECMPClassification(stats)
 
 	// Enrich each hop's primary IP
 	enricher := enrich.NewEnricher()
@@ -349,4 +370,80 @@ func getAddressFamily(req mcp.CallToolRequest) trace.AddressFamily {
 		return trace.AddressFamilyIPv6
 	}
 	return trace.AddressFamilyAuto
+}
+
+// updateMCPRateLimitFlags detects ICMP rate-limiting in MTR stats.
+// A hop is rate-limited if its loss is >10% but downstream hops have
+// significantly lower loss (difference >15%).
+func updateMCPRateLimitFlags(stats map[int]*display.HopStats) {
+	maxTTL := 0
+	for ttl, s := range stats {
+		if s.Recv > 0 && ttl > maxTTL {
+			maxTTL = ttl
+		}
+	}
+
+	for ttl, s := range stats {
+		loss := s.LossPercent()
+		if loss <= 10 {
+			s.RateLimited = false
+			continue
+		}
+
+		var downstreamLoss float64
+		var count int
+		for t := ttl + 1; t <= maxTTL; t++ {
+			ds, ok := stats[t]
+			if !ok || ds.Recv == 0 {
+				continue
+			}
+			downstreamLoss += ds.LossPercent()
+			count++
+		}
+
+		if count == 0 {
+			s.RateLimited = false
+			continue
+		}
+
+		avgDownstream := downstreamLoss / float64(count)
+		s.RateLimited = (loss - avgDownstream) > 15
+	}
+}
+
+// updateMCPECMPClassification classifies ECMP type for all hops.
+func updateMCPECMPClassification(stats map[int]*display.HopStats) {
+	for _, s := range stats {
+		if s.HasECMP() && len(s.FlowPaths) > 0 {
+			s.ECMPClassified = classifyMCPECMP(s.FlowPaths)
+		}
+	}
+}
+
+// classifyMCPECMP determines if ECMP is per-flow or per-packet.
+func classifyMCPECMP(flowPaths map[int]map[string]int) string {
+	if len(flowPaths) == 0 {
+		return ""
+	}
+
+	// If any single flow hits multiple IPs, it's per-packet
+	for _, ipCounts := range flowPaths {
+		if len(ipCounts) > 1 {
+			return "per_packet"
+		}
+	}
+
+	// If different flows hit different IPs, it's per-flow
+	allIPs := make(map[string]bool)
+	for _, ipCounts := range flowPaths {
+		for ip := range ipCounts {
+			allIPs[ip] = true
+		}
+	}
+
+	if len(allIPs) > 1 && len(flowPaths) > 1 {
+		return "per_flow"
+	}
+
+	return ""
 }

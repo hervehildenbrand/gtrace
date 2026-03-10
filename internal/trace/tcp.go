@@ -87,9 +87,9 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 			}
 		}
 
-		// NAT detection: IP-based (Tier 1), TTL-based (Tier 2), IP ID-based (Tier 3)
+		// NAT detection: IP-based (Tier 1) and TTL-based (Tier 2) only.
+		// See icmp.go comment for why IP ID analysis (Tier 3) is not used.
 		if t.config.DetectNAT {
-			var ipIDs []uint16
 			for _, p := range h.Probes {
 				if p.Timeout || p.IP == nil {
 					continue
@@ -102,10 +102,6 @@ func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 					h.NAT = true
 					break
 				}
-				ipIDs = append(ipIDs, p.IPID)
-			}
-			if !h.NAT && DetectNATFromIPID(ipIDs) {
-				h.NAT = true
 			}
 		}
 

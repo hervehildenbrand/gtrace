@@ -101,6 +101,99 @@ func TestJSONExporter_Export_PrettyPrints(t *testing.T) {
 	}
 }
 
+func TestJSONExporter_Export_IncludesICMPCode(t *testing.T) {
+	tr := hop.NewTraceResult("example.com", "1.2.3.4")
+	tr.Protocol = "udp"
+
+	h := hop.NewHop(1)
+	h.Probes = append(h.Probes, hop.Probe{
+		IP:       net.ParseIP("1.2.3.4"),
+		RTT:      5 * time.Millisecond,
+		ICMPType: 3,
+		ICMPCode: 3,
+	})
+	tr.AddHop(h)
+
+	exporter := NewJSONExporter()
+	var buf bytes.Buffer
+	_ = exporter.Export(&buf, tr)
+
+	var result ExportedTrace
+	json.Unmarshal(buf.Bytes(), &result)
+
+	if result.Hops[0].ICMPCode != "port_unreachable" {
+		t.Errorf("expected icmpCode 'port_unreachable', got %q", result.Hops[0].ICMPCode)
+	}
+}
+
+func TestJSONExporter_Export_OmitsICMPCodeForEchoReply(t *testing.T) {
+	tr := hop.NewTraceResult("example.com", "1.2.3.4")
+	tr.Protocol = "icmp"
+
+	h := hop.NewHop(1)
+	h.Probes = append(h.Probes, hop.Probe{
+		IP:       net.ParseIP("1.2.3.4"),
+		RTT:      5 * time.Millisecond,
+		ICMPType: 0, // Echo Reply
+		ICMPCode: 0,
+	})
+	tr.AddHop(h)
+
+	exporter := NewJSONExporter()
+	var buf bytes.Buffer
+	_ = exporter.Export(&buf, tr)
+
+	var result ExportedTrace
+	json.Unmarshal(buf.Bytes(), &result)
+
+	if result.Hops[0].ICMPCode != "" {
+		t.Errorf("expected empty icmpCode for echo reply, got %q", result.Hops[0].ICMPCode)
+	}
+
+	// Also verify it's omitted from JSON output entirely
+	if bytes.Contains(buf.Bytes(), []byte("icmpCode")) {
+		t.Error("expected icmpCode to be omitted from JSON output")
+	}
+}
+
+func TestJSONExporter_Export_AllICMPCodes(t *testing.T) {
+	tests := []struct {
+		code     int
+		expected string
+	}{
+		{0, "network_unreachable"},
+		{1, "host_unreachable"},
+		{3, "port_unreachable"},
+		{4, "fragmentation_needed"},
+		{9, "admin_prohibited"},
+		{10, "admin_prohibited"},
+		{13, "admin_prohibited"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			tr := hop.NewTraceResult("x", "1.2.3.4")
+			h := hop.NewHop(1)
+			h.Probes = append(h.Probes, hop.Probe{
+				IP: net.ParseIP("1.2.3.4"), RTT: time.Millisecond,
+				ICMPType: 3, ICMPCode: tt.code,
+			})
+			tr.AddHop(h)
+
+			exporter := NewJSONExporter()
+			var buf bytes.Buffer
+			_ = exporter.Export(&buf, tr)
+
+			var result ExportedTrace
+			json.Unmarshal(buf.Bytes(), &result)
+
+			if result.Hops[0].ICMPCode != tt.expected {
+				t.Errorf("code %d: expected %q, got %q", tt.code, tt.expected, result.Hops[0].ICMPCode)
+			}
+		})
+	}
+}
+
 func createTestTrace() *hop.TraceResult {
 	tr := hop.NewTraceResult("google.com", "8.8.8.8")
 	tr.Protocol = "icmp"

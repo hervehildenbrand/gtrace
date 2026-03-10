@@ -198,6 +198,48 @@ func TestSimpleRenderer_RenderHop_ShowsMTU_AllTimeouts(t *testing.T) {
 	}
 }
 
+func TestSimpleRenderer_RenderHop_ShowsICMPCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		icmpType int
+		icmpCode int
+		expected string
+	}{
+		{"network unreachable", 3, 0, "[!N]"},
+		{"host unreachable", 3, 1, "[!H]"},
+		{"port unreachable", 3, 3, "[!P]"},
+		{"fragmentation needed", 3, 4, "[!F]"},
+		{"admin prohibited", 3, 13, "[!X]"},
+		{"time exceeded - no indicator", 11, 0, ""},
+		{"echo reply - no indicator", 0, 0, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewSimpleRenderer()
+			h := hop.NewHop(1)
+			h.Probes = append(h.Probes, hop.Probe{
+				IP:       net.ParseIP("10.0.0.1"),
+				RTT:      5 * time.Millisecond,
+				ICMPType: tt.icmpType,
+				ICMPCode: tt.icmpCode,
+			})
+
+			result := r.RenderHop(h)
+
+			if tt.expected != "" {
+				if !strings.Contains(result, tt.expected) {
+					t.Errorf("expected %q in output, got %q", tt.expected, result)
+				}
+			} else {
+				if strings.Contains(result, "[!") {
+					t.Errorf("expected no ICMP indicator in output, got %q", result)
+				}
+			}
+		})
+	}
+}
+
 func TestSimpleRenderer_FormatRTT_FormatsMilliseconds(t *testing.T) {
 	r := NewSimpleRenderer()
 

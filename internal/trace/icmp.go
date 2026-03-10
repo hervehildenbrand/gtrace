@@ -99,9 +99,11 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 			}
 		}
 
-		// NAT detection: IP-based (Tier 1), TTL-based (Tier 2), IP ID-based (Tier 3)
+		// NAT detection: IP-based (Tier 1) and TTL-based (Tier 2) only.
+		// IP ID analysis (Tier 3) is not used because ICMP sockets don't expose
+		// the response packet's IP ID — we can only see our own probe's IP ID
+		// reflected in the ICMP error, which is meaningless for NAT detection.
 		if t.config.DetectNAT {
-			var ipIDs []uint16
 			for _, p := range h.Probes {
 				if p.Timeout || p.IP == nil {
 					continue
@@ -114,10 +116,6 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 					h.NAT = true
 					break
 				}
-				ipIDs = append(ipIDs, p.IPID)
-			}
-			if !h.NAT && DetectNATFromIPID(ipIDs) {
-				h.NAT = true
 			}
 		}
 

@@ -507,3 +507,109 @@ func TestFormatHop_WithNATAndMTU(t *testing.T) {
 		t.Errorf("expected MTU in result: %s", result)
 	}
 }
+
+func TestUpdateMCPRateLimitFlags(t *testing.T) {
+	stats := map[int]*display.HopStats{
+		1: display.NewHopStats(1),
+		2: display.NewHopStats(2),
+		3: display.NewHopStats(3),
+	}
+
+	// Hop 1: 0% loss
+	for i := 0; i < 10; i++ {
+		stats[1].AddProbe(net.ParseIP("10.0.0.1"), time.Millisecond)
+	}
+	// Hop 2: 50% loss (rate limited — downstream is fine)
+	for i := 0; i < 5; i++ {
+		stats[2].AddProbe(net.ParseIP("10.0.0.2"), time.Millisecond)
+		stats[2].AddTimeout()
+	}
+	// Hop 3: 0% loss
+	for i := 0; i < 10; i++ {
+		stats[3].AddProbe(net.ParseIP("10.0.0.3"), time.Millisecond)
+	}
+
+	updateMCPRateLimitFlags(stats)
+
+	if stats[1].RateLimited {
+		t.Error("hop 1 should NOT be rate limited")
+	}
+	if !stats[2].RateLimited {
+		t.Error("hop 2 SHOULD be rate limited (50% loss but downstream is 0%)")
+	}
+	if stats[3].RateLimited {
+		t.Error("hop 3 should NOT be rate limited")
+	}
+}
+
+func TestUpdateMCPRateLimitFlags_RealLoss(t *testing.T) {
+	stats := map[int]*display.HopStats{
+		1: display.NewHopStats(1),
+		2: display.NewHopStats(2),
+		3: display.NewHopStats(3),
+	}
+
+	// All hops have ~50% loss — this is real loss, not rate limiting
+	for i := 0; i < 5; i++ {
+		stats[1].AddProbe(net.ParseIP("10.0.0.1"), time.Millisecond)
+		stats[1].AddTimeout()
+		stats[2].AddProbe(net.ParseIP("10.0.0.2"), time.Millisecond)
+		stats[2].AddTimeout()
+		stats[3].AddProbe(net.ParseIP("10.0.0.3"), time.Millisecond)
+		stats[3].AddTimeout()
+	}
+
+	updateMCPRateLimitFlags(stats)
+
+	if stats[2].RateLimited {
+		t.Error("hop 2 should NOT be rate limited when downstream also has loss")
+	}
+}
+
+func TestUpdateMCPECMPClassification_PerFlow(t *testing.T) {
+	stats := map[int]*display.HopStats{
+		1: display.NewHopStats(1),
+	}
+	stats[1].AddProbe(net.ParseIP("10.0.0.1"), time.Millisecond)
+	stats[1].AddProbe(net.ParseIP("10.0.0.2"), time.Millisecond)
+
+	// Each flow consistently goes to one IP
+	stats[1].FlowPaths[1] = map[string]int{"10.0.0.1": 3}
+	stats[1].FlowPaths[2] = map[string]int{"10.0.0.2": 3}
+
+	updateMCPECMPClassification(stats)
+
+	if stats[1].ECMPClassified != "per_flow" {
+		t.Errorf("expected per_flow, got %q", stats[1].ECMPClassified)
+	}
+}
+
+func TestUpdateMCPECMPClassification_PerPacket(t *testing.T) {
+	stats := map[int]*display.HopStats{
+		1: display.NewHopStats(1),
+	}
+	stats[1].AddProbe(net.ParseIP("10.0.0.1"), time.Millisecond)
+	stats[1].AddProbe(net.ParseIP("10.0.0.2"), time.Millisecond)
+
+	// A single flow hits multiple IPs — per-packet load balancing
+	stats[1].FlowPaths[1] = map[string]int{"10.0.0.1": 2, "10.0.0.2": 1}
+
+	updateMCPECMPClassification(stats)
+
+	if stats[1].ECMPClassified != "per_packet" {
+		t.Errorf("expected per_packet, got %q", stats[1].ECMPClassified)
+	}
+}
+
+func TestUpdateMCPECMPClassification_NoECMP(t *testing.T) {
+	stats := map[int]*display.HopStats{
+		1: display.NewHopStats(1),
+	}
+	stats[1].AddProbe(net.ParseIP("10.0.0.1"), time.Millisecond)
+
+	updateMCPECMPClassification(stats)
+
+	if stats[1].ECMPClassified != "" {
+		t.Errorf("expected empty, got %q", stats[1].ECMPClassified)
+	}
+}

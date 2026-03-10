@@ -36,6 +36,7 @@ type ExportedHop struct {
 	LossPercent float64         `json:"lossPercent"`
 	NAT         bool            `json:"nat,omitempty"`
 	MTU         int             `json:"mtu,omitempty"`
+	ICMPCode    string          `json:"icmpCode,omitempty"` // e.g. "port_unreachable"
 }
 
 // ExportedProbe is the JSON representation of a single probe.
@@ -117,6 +118,7 @@ func (e *JSONExporter) convertHop(h *hop.Hop) ExportedHop {
 		LossPercent: h.LossPercent(),
 		NAT:         h.NAT,
 		MTU:         h.MTU,
+		ICMPCode:    icmpCodeForExport(h),
 	}
 
 	for _, p := range h.Probes {
@@ -147,4 +149,25 @@ func (e *JSONExporter) convertProbe(p hop.Probe) ExportedProbe {
 		RTT:     float64(p.RTT) / float64(time.Millisecond),
 		Timeout: p.Timeout,
 	}
+}
+
+// icmpCodeForExport returns a human-readable ICMP Dest Unreachable code for export.
+func icmpCodeForExport(h *hop.Hop) string {
+	for _, p := range h.Probes {
+		if p.ICMPType == 3 {
+			switch p.ICMPCode {
+			case 0:
+				return "network_unreachable"
+			case 1:
+				return "host_unreachable"
+			case 3:
+				return "port_unreachable"
+			case 4:
+				return "fragmentation_needed"
+			case 9, 10, 13:
+				return "admin_prohibited"
+			}
+		}
+	}
+	return ""
 }
