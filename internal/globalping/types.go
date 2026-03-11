@@ -5,14 +5,56 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
 
+// structuredKeys are recognized keys for structured location syntax.
+var structuredKeys = map[string]bool{
+	"country": true,
+	"city":    true,
+	"asn":     true,
+	"network": true,
+	"region":  true,
+	"tag":     true,
+}
+
 // MaxLocations is the maximum number of GlobalPing probe locations per request.
 const MaxLocations = 5
+
+// Probe represents a GlobalPing probe.
+type Probe struct {
+	Version  string        `json:"version"`
+	Location ProbeLocation `json:"location"`
+	Tags     []string      `json:"tags,omitempty"`
+	Status   string        `json:"status"`
+}
+
+// ProbeLocation contains the geographic details of a probe.
+type ProbeLocation struct {
+	Continent string  `json:"continent"`
+	Region    string  `json:"region"`
+	Country   string  `json:"country"`
+	State     string  `json:"state,omitempty"`
+	City      string  `json:"city"`
+	ASN       int     `json:"asn"`
+	Network   string  `json:"network"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+}
+
+// ProbeFilter specifies criteria for filtering probes.
+type ProbeFilter struct {
+	Country string
+	City    string
+	ASN     int
+	Network string
+	Tag     string
+	Status  string // default "ready"
+}
 
 // MeasurementType represents the type of measurement.
 type MeasurementType string
@@ -51,17 +93,105 @@ type Location struct {
 	Limit     int    `json:"limit,omitempty"`     // Max probes from this location
 }
 
-// ParseLocationString parses a location string into a Location.
-// Supports formats: city name, country code (2 letters), ASN (AS12345),
-// cloud region (AWS+us-east-1), etc.
-func ParseLocationString(s string) Location {
-	s = strings.TrimSpace(s)
-	return Location{Magic: s}
+// isStructuredLocation checks if a string uses the key:value structured syntax.
+// Returns true if the first segment before ':' is a known key.
+func isStructuredLocation(s string) bool {
+	idx := strings.Index(s, ":")
+	if idx < 0 {
+		return false
+	}
+	// Extract the key part (before first colon), handling comma-separated fields
+	// e.g. "city:Tokyo,asn:2497" - first key is "city"
+	firstPart := s[:idx]
+	// If there's a comma before the colon, it's not structured (e.g. "Paris, city:foo" won't hit here)
+	if strings.Contains(firstPart, ",") {
+		firstPart = firstPart[strings.LastIndex(firstPart, ",")+1:]
+	}
+	firstPart = strings.TrimSpace(firstPart)
+	return structuredKeys[strings.ToLower(firstPart)]
 }
 
-// ParseLocationStrings parses a comma-separated list of locations.
+// ParseLocationString parses a location string into a Location.
+// Supports formats:
+//   - Plain: "Paris", "DE", "AS13335", "AWS+us-east-1" → Location{Magic: s}
+//   - Structured: "country:DE", "city:Tokyo,asn:2497" → Location{Country: "DE"}, etc.
+//   - Limit suffix: "country:US@3" → Location{Country: "US", Limit: 3}
+func ParseLocationString(s string) Location {
+	s = strings.TrimSpace(s)
+	if !isStructuredLocation(s) {
+		return Location{Magic: s}
+	}
+	return parseStructuredLocation(s)
+}
+
+// parseStructuredLocation parses "key:value,key:value[@limit]" syntax.
+func parseStructuredLocation(s string) Location {
+	var loc Location
+
+	// Check for @limit suffix
+	if idx := strings.LastIndex(s, "@"); idx > 0 {
+		limitStr := s[idx+1:]
+		if n, err := strconv.Atoi(limitStr); err == nil {
+			loc.Limit = n
+		}
+		s = s[:idx]
+	}
+
+	// Split on comma for multiple key:value pairs
+	pairs := strings.Split(s, ",")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		idx := strings.Index(pair, ":")
+		if idx < 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(pair[:idx]))
+		value := strings.TrimSpace(pair[idx+1:])
+		switch key {
+		case "country":
+			loc.Country = value
+		case "city":
+			loc.City = value
+		case "asn":
+			if n, err := strconv.Atoi(value); err == nil {
+				loc.ASN = n
+			}
+		case "network":
+			loc.Network = value
+		case "region":
+			loc.Region = value
+		case "tag":
+			loc.Tags = append(loc.Tags, value)
+		}
+	}
+
+	return loc
+}
+
+// ParseLocationStrings parses a list of locations separated by semicolons or commas.
+// Semicolons are used as the primary separator to avoid ambiguity with structured
+// syntax that uses commas internally (e.g. "city:Tokyo,asn:2497").
+// Plain comma-separated locations still work when no structured syntax is detected.
 func ParseLocationStrings(s string) []Location {
-	parts := strings.Split(s, ",")
+	// If semicolons are present, use them as separators
+	if strings.Contains(s, ";") {
+		return parseLocationsByDelimiter(s, ";")
+	}
+
+	// If any part looks structured (contains key:value), treat commas within
+	// structured expressions as field separators, not location separators.
+	// Heuristic: if the string contains a structured key followed by ':', parse as single location.
+	if isStructuredLocation(s) {
+		loc := ParseLocationString(s)
+		return []Location{loc}
+	}
+
+	// Default: comma-separated plain locations
+	return parseLocationsByDelimiter(s, ",")
+}
+
+func parseLocationsByDelimiter(s, delim string) []Location {
+	parts := strings.Split(s, delim)
 	locs := make([]Location, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)

@@ -294,6 +294,127 @@ func TestMeasurementRequest_ValidateAcceptsMaxLocations(t *testing.T) {
 	}
 }
 
+// Structured location parsing tests
+
+func TestParseLocationString_StructuredCountry(t *testing.T) {
+	loc := ParseLocationString("country:DE")
+	if loc.Country != "DE" {
+		t.Errorf("expected Country 'DE', got %q", loc.Country)
+	}
+	if loc.Magic != "" {
+		t.Errorf("expected empty Magic, got %q", loc.Magic)
+	}
+}
+
+func TestParseLocationString_StructuredCity(t *testing.T) {
+	loc := ParseLocationString("city:Tokyo")
+	if loc.City != "Tokyo" {
+		t.Errorf("expected City 'Tokyo', got %q", loc.City)
+	}
+}
+
+func TestParseLocationString_StructuredASN(t *testing.T) {
+	loc := ParseLocationString("asn:2497")
+	if loc.ASN != 2497 {
+		t.Errorf("expected ASN 2497, got %d", loc.ASN)
+	}
+}
+
+func TestParseLocationString_StructuredNetwork(t *testing.T) {
+	loc := ParseLocationString("network:OVH")
+	if loc.Network != "OVH" {
+		t.Errorf("expected Network 'OVH', got %q", loc.Network)
+	}
+}
+
+func TestParseLocationString_StructuredMultipleFields(t *testing.T) {
+	loc := ParseLocationString("city:Tokyo,asn:2497")
+	if loc.City != "Tokyo" {
+		t.Errorf("expected City 'Tokyo', got %q", loc.City)
+	}
+	if loc.ASN != 2497 {
+		t.Errorf("expected ASN 2497, got %d", loc.ASN)
+	}
+}
+
+func TestParseLocationString_StructuredCountryAndCity(t *testing.T) {
+	loc := ParseLocationString("country:GB,city:London")
+	if loc.Country != "GB" {
+		t.Errorf("expected Country 'GB', got %q", loc.Country)
+	}
+	if loc.City != "London" {
+		t.Errorf("expected City 'London', got %q", loc.City)
+	}
+}
+
+func TestParseLocationString_StructuredWithLimit(t *testing.T) {
+	loc := ParseLocationString("country:US@3")
+	if loc.Country != "US" {
+		t.Errorf("expected Country 'US', got %q", loc.Country)
+	}
+	if loc.Limit != 3 {
+		t.Errorf("expected Limit 3, got %d", loc.Limit)
+	}
+}
+
+func TestParseLocationString_StructuredRegion(t *testing.T) {
+	loc := ParseLocationString("region:Northern Europe")
+	if loc.Region != "Northern Europe" {
+		t.Errorf("expected Region 'Northern Europe', got %q", loc.Region)
+	}
+}
+
+func TestParseLocationString_StructuredTag(t *testing.T) {
+	loc := ParseLocationString("tag:datacenter")
+	if len(loc.Tags) != 1 || loc.Tags[0] != "datacenter" {
+		t.Errorf("expected Tags ['datacenter'], got %v", loc.Tags)
+	}
+}
+
+func TestParseLocationString_PlainStringWithColonNotStructured(t *testing.T) {
+	// "AWS+us-east-1" should remain Magic (no known key prefix)
+	loc := ParseLocationString("AWS+us-east-1")
+	if loc.Magic != "AWS+us-east-1" {
+		t.Errorf("expected Magic 'AWS+us-east-1', got %q", loc.Magic)
+	}
+}
+
+func TestParseLocationString_StructuredInvalidASN(t *testing.T) {
+	// Invalid ASN should be ignored, other fields still parsed
+	loc := ParseLocationString("asn:notanumber,city:Tokyo")
+	if loc.City != "Tokyo" {
+		t.Errorf("expected City 'Tokyo', got %q", loc.City)
+	}
+	if loc.ASN != 0 {
+		t.Errorf("expected ASN 0 for invalid, got %d", loc.ASN)
+	}
+}
+
+func TestParseLocationStrings_MixedMagicAndStructured(t *testing.T) {
+	// When using ParseLocationStrings with multiple locations separated
+	// by semicolons (for structured locations that use commas internally)
+	locs := ParseLocationStrings("Paris; city:Tokyo,asn:2497")
+	if len(locs) != 2 {
+		t.Fatalf("expected 2 locations, got %d", len(locs))
+	}
+	if locs[0].Magic != "Paris" {
+		t.Errorf("expected first location Magic 'Paris', got %q", locs[0].Magic)
+	}
+	if locs[1].City != "Tokyo" {
+		t.Errorf("expected second location City 'Tokyo', got %q", locs[1].City)
+	}
+	if locs[1].ASN != 2497 {
+		t.Errorf("expected second location ASN 2497, got %d", locs[1].ASN)
+	}
+}
+
+func TestParseLocationString_StructuredCaseInsensitive(t *testing.T) {
+	loc := ParseLocationString("Country:JP")
+	if loc.Country != "JP" {
+		t.Errorf("expected Country 'JP', got %q", loc.Country)
+	}
+}
+
 func TestMeasurementOptions_IPVersion(t *testing.T) {
 	tests := []struct {
 		name     string

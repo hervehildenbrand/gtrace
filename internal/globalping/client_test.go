@@ -350,6 +350,219 @@ func TestClient_GetMeasurement_RetriesOn429(t *testing.T) {
 	}
 }
 
+func TestClient_ListProbes_ReturnsProbes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/probes" {
+			t.Errorf("expected /v1/probes, got %s", r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Probe{
+			{
+				Version: "0.28.0",
+				Location: ProbeLocation{
+					Continent: "EU",
+					Country:   "GB",
+					City:      "London",
+					ASN:       5089,
+					Network:   "Virgin Media",
+					Latitude:  51.5074,
+					Longitude: -0.1278,
+				},
+				Tags:   []string{"datacenter"},
+				Status: "ready",
+			},
+			{
+				Version: "0.28.0",
+				Location: ProbeLocation{
+					Continent: "AS",
+					Country:   "JP",
+					City:      "Tokyo",
+					ASN:       2497,
+					Network:   "IIJ",
+					Latitude:  35.6762,
+					Longitude: 139.6503,
+				},
+				Status: "ready",
+			},
+			{
+				Version: "0.28.0",
+				Location: ProbeLocation{
+					Continent: "EU",
+					Country:   "DE",
+					City:      "Frankfurt",
+					ASN:       24940,
+					Network:   "Hetzner",
+				},
+				Status: "offline",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	probes, err := client.ListProbes(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// nil filter defaults to status=ready, so offline probe should be filtered
+	if len(probes) != 2 {
+		t.Fatalf("expected 2 ready probes, got %d", len(probes))
+	}
+}
+
+func TestClient_ListProbes_FiltersByCountry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Probe{
+			{Location: ProbeLocation{Country: "GB", City: "London", ASN: 5089, Network: "Virgin Media"}, Status: "ready"},
+			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497, Network: "IIJ"}, Status: "ready"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	probes, err := client.ListProbes(context.Background(), &ProbeFilter{Country: "JP"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(probes) != 1 {
+		t.Fatalf("expected 1 probe, got %d", len(probes))
+	}
+	if probes[0].Location.City != "Tokyo" {
+		t.Errorf("expected Tokyo, got %s", probes[0].Location.City)
+	}
+}
+
+func TestClient_ListProbes_FiltersByASN(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Probe{
+			{Location: ProbeLocation{Country: "US", City: "San Jose", ASN: 13335, Network: "Cloudflare"}, Status: "ready"},
+			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497, Network: "IIJ"}, Status: "ready"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	probes, err := client.ListProbes(context.Background(), &ProbeFilter{ASN: 13335})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(probes) != 1 {
+		t.Fatalf("expected 1 probe, got %d", len(probes))
+	}
+	if probes[0].Location.Network != "Cloudflare" {
+		t.Errorf("expected Cloudflare, got %s", probes[0].Location.Network)
+	}
+}
+
+func TestClient_ListProbes_FiltersByCitySubstring(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Probe{
+			{Location: ProbeLocation{Country: "GB", City: "London", ASN: 5089}, Status: "ready"},
+			{Location: ProbeLocation{Country: "CA", City: "London", ASN: 577}, Status: "ready"},
+			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497}, Status: "ready"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	probes, err := client.ListProbes(context.Background(), &ProbeFilter{City: "london"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(probes) != 2 {
+		t.Fatalf("expected 2 probes matching 'london', got %d", len(probes))
+	}
+}
+
+func TestClient_ListProbes_FiltersByNetworkSubstring(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Probe{
+			{Location: ProbeLocation{Country: "GB", Network: "LINX"}, Status: "ready"},
+			{Location: ProbeLocation{Country: "US", Network: "Cloudflare"}, Status: "ready"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	probes, err := client.ListProbes(context.Background(), &ProbeFilter{Network: "linx"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(probes) != 1 {
+		t.Fatalf("expected 1 probe, got %d", len(probes))
+	}
+}
+
+func TestClient_ListProbes_FiltersByTag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Probe{
+			{Location: ProbeLocation{City: "London"}, Tags: []string{"datacenter"}, Status: "ready"},
+			{Location: ProbeLocation{City: "Tokyo"}, Tags: []string{"eyeball"}, Status: "ready"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	probes, err := client.ListProbes(context.Background(), &ProbeFilter{Tag: "datacenter"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(probes) != 1 {
+		t.Fatalf("expected 1 probe, got %d", len(probes))
+	}
+	if probes[0].Location.City != "London" {
+		t.Errorf("expected London, got %s", probes[0].Location.City)
+	}
+}
+
+func TestClient_ListProbes_AllStatusFilter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]Probe{
+			{Location: ProbeLocation{City: "London"}, Status: "ready"},
+			{Location: ProbeLocation{City: "Tokyo"}, Status: "offline"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient("")
+	client.baseURL = server.URL
+
+	// With status "" and explicit "all" behavior not set, default is "ready"
+	// But if we set Status to something specific:
+	probes, err := client.ListProbes(context.Background(), &ProbeFilter{Status: "offline"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(probes) != 1 {
+		t.Fatalf("expected 1 probe, got %d", len(probes))
+	}
+	if probes[0].Location.City != "Tokyo" {
+		t.Errorf("expected Tokyo, got %s", probes[0].Location.City)
+	}
+}
+
 func TestClient_GetMeasurement_FailsAfterMaxRetries(t *testing.T) {
 	calls := 0
 

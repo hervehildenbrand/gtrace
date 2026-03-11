@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -215,6 +216,80 @@ func (c *Client) RunMeasurement(ctx context.Context, req *MeasurementRequest) (*
 	}
 
 	return c.WaitForMeasurement(ctx, resp.ID)
+}
+
+// ListProbes retrieves available probes from the GlobalPing API.
+// Filters results client-side based on the provided filter criteria.
+// If filter is nil, returns all probes with status "ready".
+func (c *Client) ListProbes(ctx context.Context, filter *ProbeFilter) ([]Probe, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v1/probes", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	c.setHeaders(httpReq)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var probes []Probe
+	if err := json.NewDecoder(resp.Body).Decode(&probes); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return filterProbes(probes, filter), nil
+}
+
+// filterProbes applies client-side filtering to a list of probes.
+func filterProbes(probes []Probe, filter *ProbeFilter) []Probe {
+	status := "ready"
+	if filter != nil && filter.Status != "" {
+		status = filter.Status
+	}
+
+	var result []Probe
+	for _, p := range probes {
+		if status != "all" && !strings.EqualFold(p.Status, status) {
+			continue
+		}
+		if filter != nil {
+			if filter.Country != "" && !strings.EqualFold(p.Location.Country, filter.Country) {
+				continue
+			}
+			if filter.City != "" && !strings.Contains(strings.ToLower(p.Location.City), strings.ToLower(filter.City)) {
+				continue
+			}
+			if filter.ASN != 0 && p.Location.ASN != filter.ASN {
+				continue
+			}
+			if filter.Network != "" && !strings.Contains(strings.ToLower(p.Location.Network), strings.ToLower(filter.Network)) {
+				continue
+			}
+			if filter.Tag != "" && !containsTag(p.Tags, filter.Tag) {
+				continue
+			}
+		}
+		result = append(result, p)
+	}
+	return result
+}
+
+// containsTag checks if a tag list contains a specific tag (case-insensitive).
+func containsTag(tags []string, tag string) bool {
+	for _, t := range tags {
+		if strings.EqualFold(t, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // setHeaders sets common request headers.
