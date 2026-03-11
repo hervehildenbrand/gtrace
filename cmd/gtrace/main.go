@@ -17,6 +17,7 @@ func SetupCmd(version string) *cobra.Command {
 	cmd.AddCommand(NewUpgradeCmd(version))
 	cmd.AddCommand(NewInfoCmd())
 	cmd.AddCommand(NewMCPCmd())
+	cmd.AddCommand(NewProbesCmd())
 	return cmd
 }
 

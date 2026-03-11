@@ -223,7 +223,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	}
 
 	// Source location flags
-	cmd.Flags().StringVar(&cfg.From, "from", "", "Run from GlobalPing location(s), comma-separated (max 5)")
+	cmd.Flags().StringVar(&cfg.From, "from", "", "Run from GlobalPing location(s), max 5. Simple: Paris;Tokyo;DE. Structured: city:Tokyo,asn:2497. Use 'gtrace probes' to discover locations")
 	cmd.Flags().BoolVar(&cfg.Compare, "compare", false, "Compare local + remote traces")
 	cmd.Flags().BoolVar(&cfg.NoLocal, "no-local", false, "Skip local trace, compare remote locations only")
 	cmd.Flags().StringVar(&cfg.View, "view", "side", "Display mode: side|tabs|unified")

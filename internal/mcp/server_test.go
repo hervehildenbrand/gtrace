@@ -19,6 +19,7 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 	tools := s.ListTools()
 
 	expected := map[string]bool{
+		"list_probes": false,
 		"traceroute":  false,
 		"mtr":         false,
 		"globalping":  false,
@@ -39,8 +40,8 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 		}
 	}
 
-	if len(tools) != 6 {
-		t.Errorf("expected 6 tools, got %d", len(tools))
+	if len(tools) != 7 {
+		t.Errorf("expected 7 tools, got %d", len(tools))
 	}
 }
 

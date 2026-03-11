@@ -7,8 +7,51 @@ import (
 
 	"github.com/hervehildenbrand/gtrace/internal/display"
 	"github.com/hervehildenbrand/gtrace/internal/enrich"
+	"github.com/hervehildenbrand/gtrace/internal/globalping"
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 )
+
+// formatProbeList formats a list of probes for MCP output.
+func formatProbeList(probes []globalping.Probe) string {
+	var sb strings.Builder
+
+	if len(probes) == 0 {
+		sb.WriteString("No probes found matching the criteria.\n")
+		return sb.String()
+	}
+
+	fmt.Fprintf(&sb, "Found %d probes:\n\n", len(probes))
+	fmt.Fprintf(&sb, "%-20s  %-4s  %8s  %-25s  %s\n",
+		"City", "CC", "ASN", "Network", "Tags")
+	sb.WriteString(strings.Repeat("-", 85))
+	sb.WriteByte('\n')
+
+	for _, p := range probes {
+		tags := ""
+		if len(p.Tags) > 0 {
+			tags = strings.Join(p.Tags, ", ")
+		}
+		cityStr := p.Location.City
+		if len(cityStr) > 20 {
+			cityStr = cityStr[:17] + "..."
+		}
+		networkStr := p.Location.Network
+		if len(networkStr) > 25 {
+			networkStr = networkStr[:22] + "..."
+		}
+		fmt.Fprintf(&sb, "%-20s  %-4s  %8d  %-25s  %s\n",
+			cityStr,
+			p.Location.Country,
+			p.Location.ASN,
+			networkStr,
+			tags)
+	}
+
+	sb.WriteString("\nUse these with the globalping tool's 'from' parameter.\n")
+	sb.WriteString("Example: from='city:Tokyo,asn:2497' or from='country:GB,network:BT'\n")
+
+	return sb.String()
+}
 
 // formatTraceResult formats a TraceResult as a human-readable text table.
 func formatTraceResult(tr *hop.TraceResult) string {

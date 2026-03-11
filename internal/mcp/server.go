@@ -15,6 +15,7 @@ func NewServer(version, apiKey string) *server.MCPServer {
 
 	h := &handlers{apiKey: apiKey}
 
+	s.AddTool(listProbesTool(), h.handleListProbes)
 	s.AddTool(tracerouteTool(), h.handleTraceroute)
 	s.AddTool(mtrTool(), h.handleMTR)
 	s.AddTool(globalPingTool(), h.handleGlobalPing)
@@ -101,16 +102,65 @@ func mtrTool() mcp.Tool {
 	)
 }
 
+func listProbesTool() mcp.Tool {
+	return mcp.NewTool("list_probes",
+		mcp.WithDescription(`Discover available GlobalPing probe locations worldwide. Use this BEFORE the globalping tool to find precise probe locations.
+
+Workflow: call list_probes to find probes, then use the globalping tool with structured 'from' syntax for precise selection.
+
+Filter by country (ISO code), city, ASN number, network name, or tag. Returns probe locations with city, country, ASN, and network info.
+
+Examples:
+- Find probes in Japan: {"country": "JP"}
+- Find probes in Cloudflare's network: {"asn": 13335}
+- Find probes at a specific IXP or network: {"network": "LINX"} or {"tag": "datacenter"}`),
+		mcp.WithString("country",
+			mcp.Description("ISO country code filter (e.g., JP, US, DE, GB)"),
+		),
+		mcp.WithString("city",
+			mcp.Description("City name filter (case-insensitive substring match)"),
+		),
+		mcp.WithNumber("asn",
+			mcp.Description("ASN number filter (e.g., 13335 for Cloudflare, 2497 for IIJ)"),
+		),
+		mcp.WithString("network",
+			mcp.Description("Network name filter (case-insensitive substring match)"),
+		),
+		mcp.WithString("tag",
+			mcp.Description("Probe tag filter (e.g., datacenter, eyeball)"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of probes to return (default: 20)"),
+		),
+	)
+}
+
 func globalPingTool() mcp.Tool {
 	return mcp.NewTool("globalping",
-		mcp.WithDescription("Run a traceroute from remote GlobalPing probe locations worldwide. Does not require root privileges. Works without an API key (rate-limited); provide one via --api-key for higher limits."),
+		mcp.WithDescription(`Run a traceroute from remote GlobalPing probe locations worldwide. Supports ICMP (default), TCP, and UDP protocols — use TCP/UDP when ICMP is filtered.
+
+Does not require root privileges. Works without an API key (rate-limited); provide one via --api-key for higher limits.
+
+Use the list_probes tool first to discover available probe locations, then specify them here.
+
+Location syntax for 'from' parameter:
+- Simple: "Paris", "Tokyo", "DE", "AS13335" (flexible matching)
+- Structured: "country:JP", "city:London,asn:5089" (precise AND-filtering)
+- Multiple: "Paris; Tokyo" or semicolon-separated for multiple structured locations
+
+Protocol examples:
+- TCP traceroute to port 443: protocol="tcp", port=443
+- UDP traceroute: protocol="udp", port=33434
+- ICMP (default): omit protocol parameter
+
+Tip: When ICMP is filtered, try protocol="tcp" with port=80 or port=443 for better path visibility.`),
 		mcp.WithString("target",
 			mcp.Required(),
 			mcp.Description("Target hostname or IP address to trace"),
 		),
 		mcp.WithString("from",
 			mcp.Required(),
-			mcp.Description("Comma-separated probe locations (e.g., 'Paris, London, Tokyo'). Max 5 locations."),
+			mcp.Description("Probe locations (max 5). Simple: 'Paris; Tokyo; DE'. Structured for precision: 'city:Tokyo,asn:2497' or 'country:GB,network:BT'. Use semicolons to separate multiple locations. Use list_probes tool to discover available locations."),
 		),
 		mcp.WithString("protocol",
 			mcp.Description("Protocol to use: icmp, udp, or tcp"),

@@ -19,6 +19,43 @@ type handlers struct {
 	apiKey string
 }
 
+func (h *handlers) handleListProbes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	filter := &globalping.ProbeFilter{}
+
+	if v := req.GetString("country", ""); v != "" {
+		filter.Country = v
+	}
+	if v := req.GetString("city", ""); v != "" {
+		filter.City = v
+	}
+	if v := req.GetInt("asn", 0); v > 0 {
+		filter.ASN = v
+	}
+	if v := req.GetString("network", ""); v != "" {
+		filter.Network = v
+	}
+	if v := req.GetString("tag", ""); v != "" {
+		filter.Tag = v
+	}
+
+	limit := req.GetInt("limit", 20)
+	if limit < 1 {
+		limit = 20
+	}
+
+	client := globalping.NewClient(h.apiKey)
+	probes, err := client.ListProbes(ctx, filter)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to list probes: %v", err)), nil
+	}
+
+	if limit > 0 && len(probes) > limit {
+		probes = probes[:limit]
+	}
+
+	return mcp.NewToolResultText(formatProbeList(probes)), nil
+}
+
 func (h *handlers) handleTraceroute(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	target, err := req.RequireString("target")
 	if err != nil {
