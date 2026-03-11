@@ -26,11 +26,12 @@ var structuredKeys = map[string]bool{
 const MaxLocations = 5
 
 // Probe represents a GlobalPing probe.
+// Note: The /v1/probes API only returns online probes, so there is no status field.
 type Probe struct {
-	Version  string        `json:"version"`
-	Location ProbeLocation `json:"location"`
-	Tags     []string      `json:"tags,omitempty"`
-	Status   string        `json:"status"`
+	Version   string        `json:"version"`
+	Location  ProbeLocation `json:"location"`
+	Tags      []string      `json:"tags,omitempty"`
+	Resolvers []string      `json:"resolvers,omitempty"`
 }
 
 // ProbeLocation contains the geographic details of a probe.
@@ -53,7 +54,6 @@ type ProbeFilter struct {
 	ASN     int
 	Network string
 	Tag     string
-	Status  string // default "ready"
 }
 
 // MeasurementType represents the type of measurement.

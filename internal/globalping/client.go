@@ -250,32 +250,26 @@ func (c *Client) ListProbes(ctx context.Context, filter *ProbeFilter) ([]Probe, 
 
 // filterProbes applies client-side filtering to a list of probes.
 func filterProbes(probes []Probe, filter *ProbeFilter) []Probe {
-	status := "ready"
-	if filter != nil && filter.Status != "" {
-		status = filter.Status
+	if filter == nil {
+		return probes
 	}
 
 	var result []Probe
 	for _, p := range probes {
-		if status != "all" && !strings.EqualFold(p.Status, status) {
+		if filter.Country != "" && !strings.EqualFold(p.Location.Country, filter.Country) {
 			continue
 		}
-		if filter != nil {
-			if filter.Country != "" && !strings.EqualFold(p.Location.Country, filter.Country) {
-				continue
-			}
-			if filter.City != "" && !strings.Contains(strings.ToLower(p.Location.City), strings.ToLower(filter.City)) {
-				continue
-			}
-			if filter.ASN != 0 && p.Location.ASN != filter.ASN {
-				continue
-			}
-			if filter.Network != "" && !strings.Contains(strings.ToLower(p.Location.Network), strings.ToLower(filter.Network)) {
-				continue
-			}
-			if filter.Tag != "" && !containsTag(p.Tags, filter.Tag) {
-				continue
-			}
+		if filter.City != "" && !strings.Contains(strings.ToLower(p.Location.City), strings.ToLower(filter.City)) {
+			continue
+		}
+		if filter.ASN != 0 && p.Location.ASN != filter.ASN {
+			continue
+		}
+		if filter.Network != "" && !strings.Contains(strings.ToLower(p.Location.Network), strings.ToLower(filter.Network)) {
+			continue
+		}
+		if filter.Tag != "" && !containsTag(p.Tags, filter.Tag) {
+			continue
 		}
 		result = append(result, p)
 	}

@@ -372,8 +372,7 @@ func TestClient_ListProbes_ReturnsProbes(t *testing.T) {
 					Latitude:  51.5074,
 					Longitude: -0.1278,
 				},
-				Tags:   []string{"datacenter"},
-				Status: "ready",
+				Tags: []string{"datacenter"},
 			},
 			{
 				Version: "0.28.0",
@@ -386,7 +385,6 @@ func TestClient_ListProbes_ReturnsProbes(t *testing.T) {
 					Latitude:  35.6762,
 					Longitude: 139.6503,
 				},
-				Status: "ready",
 			},
 			{
 				Version: "0.28.0",
@@ -397,7 +395,6 @@ func TestClient_ListProbes_ReturnsProbes(t *testing.T) {
 					ASN:       24940,
 					Network:   "Hetzner",
 				},
-				Status: "offline",
 			},
 		})
 	}))
@@ -406,13 +403,13 @@ func TestClient_ListProbes_ReturnsProbes(t *testing.T) {
 	client := NewClient("")
 	client.baseURL = server.URL
 
+	// nil filter returns all probes (API only returns online probes)
 	probes, err := client.ListProbes(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// nil filter defaults to status=ready, so offline probe should be filtered
-	if len(probes) != 2 {
-		t.Fatalf("expected 2 ready probes, got %d", len(probes))
+	if len(probes) != 3 {
+		t.Fatalf("expected 3 probes, got %d", len(probes))
 	}
 }
 
@@ -420,8 +417,8 @@ func TestClient_ListProbes_FiltersByCountry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode([]Probe{
-			{Location: ProbeLocation{Country: "GB", City: "London", ASN: 5089, Network: "Virgin Media"}, Status: "ready"},
-			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497, Network: "IIJ"}, Status: "ready"},
+			{Location: ProbeLocation{Country: "GB", City: "London", ASN: 5089, Network: "Virgin Media"}},
+			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497, Network: "IIJ"}},
 		})
 	}))
 	defer server.Close()
@@ -445,8 +442,8 @@ func TestClient_ListProbes_FiltersByASN(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode([]Probe{
-			{Location: ProbeLocation{Country: "US", City: "San Jose", ASN: 13335, Network: "Cloudflare"}, Status: "ready"},
-			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497, Network: "IIJ"}, Status: "ready"},
+			{Location: ProbeLocation{Country: "US", City: "San Jose", ASN: 13335, Network: "Cloudflare"}},
+			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497, Network: "IIJ"}},
 		})
 	}))
 	defer server.Close()
@@ -470,9 +467,9 @@ func TestClient_ListProbes_FiltersByCitySubstring(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode([]Probe{
-			{Location: ProbeLocation{Country: "GB", City: "London", ASN: 5089}, Status: "ready"},
-			{Location: ProbeLocation{Country: "CA", City: "London", ASN: 577}, Status: "ready"},
-			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497}, Status: "ready"},
+			{Location: ProbeLocation{Country: "GB", City: "London", ASN: 5089}},
+			{Location: ProbeLocation{Country: "CA", City: "London", ASN: 577}},
+			{Location: ProbeLocation{Country: "JP", City: "Tokyo", ASN: 2497}},
 		})
 	}))
 	defer server.Close()
@@ -493,8 +490,8 @@ func TestClient_ListProbes_FiltersByNetworkSubstring(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode([]Probe{
-			{Location: ProbeLocation{Country: "GB", Network: "LINX"}, Status: "ready"},
-			{Location: ProbeLocation{Country: "US", Network: "Cloudflare"}, Status: "ready"},
+			{Location: ProbeLocation{Country: "GB", Network: "LINX"}},
+			{Location: ProbeLocation{Country: "US", Network: "Cloudflare"}},
 		})
 	}))
 	defer server.Close()
@@ -515,8 +512,8 @@ func TestClient_ListProbes_FiltersByTag(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode([]Probe{
-			{Location: ProbeLocation{City: "London"}, Tags: []string{"datacenter"}, Status: "ready"},
-			{Location: ProbeLocation{City: "Tokyo"}, Tags: []string{"eyeball"}, Status: "ready"},
+			{Location: ProbeLocation{City: "London"}, Tags: []string{"datacenter"}},
+			{Location: ProbeLocation{City: "Tokyo"}, Tags: []string{"eyeball"}},
 		})
 	}))
 	defer server.Close()
@@ -536,12 +533,12 @@ func TestClient_ListProbes_FiltersByTag(t *testing.T) {
 	}
 }
 
-func TestClient_ListProbes_AllStatusFilter(t *testing.T) {
+func TestClient_ListProbes_EmptyFilterReturnsAll(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode([]Probe{
-			{Location: ProbeLocation{City: "London"}, Status: "ready"},
-			{Location: ProbeLocation{City: "Tokyo"}, Status: "offline"},
+			{Location: ProbeLocation{City: "London"}},
+			{Location: ProbeLocation{City: "Tokyo"}},
 		})
 	}))
 	defer server.Close()
@@ -549,17 +546,12 @@ func TestClient_ListProbes_AllStatusFilter(t *testing.T) {
 	client := NewClient("")
 	client.baseURL = server.URL
 
-	// With status "" and explicit "all" behavior not set, default is "ready"
-	// But if we set Status to something specific:
-	probes, err := client.ListProbes(context.Background(), &ProbeFilter{Status: "offline"})
+	probes, err := client.ListProbes(context.Background(), &ProbeFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(probes) != 1 {
-		t.Fatalf("expected 1 probe, got %d", len(probes))
-	}
-	if probes[0].Location.City != "Tokyo" {
-		t.Errorf("expected Tokyo, got %s", probes[0].Location.City)
+	if len(probes) != 2 {
+		t.Fatalf("expected 2 probes, got %d", len(probes))
 	}
 }
 
