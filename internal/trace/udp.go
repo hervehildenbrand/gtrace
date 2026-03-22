@@ -86,7 +86,7 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 				continue
 			}
 
-			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL, FlowID: flowID}
+			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL, FlowID: flowID, TransportInfo: pr.TransportInfo}
 			h.Probes = append(h.Probes, probe)
 
 			// Set MPLS labels if discovered (first probe with labels wins)
@@ -241,7 +241,12 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 					}
 					ipid := ExtractIPID(body.Data)
 					origTTL := ExtractOriginalTTL(body.Data)
-					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL, InterfaceInfo: ifInfo}, nil
+					ipHdrSize := IPHeaderSize(target)
+					var transportInfo *hop.TransportInfo
+					if t.config.Decode {
+						transportInfo = ExtractTransportInfo(body.Data, ipHdrSize, string(t.config.Protocol))
+					}
+					return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL, InterfaceInfo: ifInfo, TransportInfo: transportInfo}, nil
 				}
 			}
 		}
@@ -260,7 +265,12 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 					}
 					ipid := ExtractIPID(body.Data)
 					origTTL := ExtractOriginalTTL(body.Data)
-					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
+					ipHdrSize := IPHeaderSize(target)
+					var transportInfo *hop.TransportInfo
+					if t.config.Decode {
+						transportInfo = ExtractTransportInfo(body.Data, ipHdrSize, string(t.config.Protocol))
+					}
+					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code, OriginalTTL: origTTL, TransportInfo: transportInfo}, nil
 				}
 			}
 		}

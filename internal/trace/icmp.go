@@ -76,7 +76,7 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 				continue
 			}
 
-			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL, FlowID: flowID}
+			probe := hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL, FlowID: flowID, TransportInfo: pr.TransportInfo}
 			h.Probes = append(h.Probes, probe)
 
 			// Set MPLS labels if discovered (first probe with labels wins)
@@ -136,16 +136,17 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 
 // probeResult holds the result of a single probe including MPLS labels.
 type probeResult struct {
-	IP          net.IP
-	RTT         time.Duration
-	MPLS        []hop.MPLSLabel
-	ResponseTTL int    // TTL from response packet (for NAT detection)
-	MTU         int    // Discovered MTU from Fragmentation Needed
-	IPID        uint16 // IP ID from original datagram in ICMP error
-	ICMPType      int              // ICMP response message type
-	ICMPCode      int              // ICMP response message code
-	OriginalTTL   int              // TTL from original datagram in ICMP error (-1 = not set)
+	IP            net.IP
+	RTT           time.Duration
+	MPLS          []hop.MPLSLabel
+	ResponseTTL   int                // TTL from response packet (for NAT detection)
+	MTU           int                // Discovered MTU from Fragmentation Needed
+	IPID          uint16             // IP ID from original datagram in ICMP error
+	ICMPType      int                // ICMP response message type
+	ICMPCode      int                // ICMP response message code
+	OriginalTTL   int                // TTL from original datagram in ICMP error (-1 = not set)
 	InterfaceInfo *hop.InterfaceInfo // RFC 5837 interface info (nil if not available)
+	TransportInfo *hop.TransportInfo // Decoded transport header info (nil if --decode not used)
 }
 
 // ExtractIPID extracts the IP Identification field from an original IP header
@@ -265,7 +266,11 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 						}
 						ipid := ExtractIPID(body.Data)
 						origTTL := ExtractOriginalTTL(body.Data)
-						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL, InterfaceInfo: ifInfo}, nil
+						var transportInfo *hop.TransportInfo
+						if t.config.Decode {
+							transportInfo = ExtractTransportInfo(body.Data, ipHdrSize, string(t.config.Protocol))
+						}
+						return &probeResult{IP: peerIP, RTT: rtt, MPLS: mplsLabels, ResponseTTL: responseTTL, IPID: ipid, ICMPType: 11, ICMPCode: rm.Code, OriginalTTL: origTTL, InterfaceInfo: ifInfo, TransportInfo: transportInfo}, nil
 					}
 				}
 			}
@@ -289,7 +294,11 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 						}
 						ipid := ExtractIPID(body.Data)
 						origTTL := ExtractOriginalTTL(body.Data)
-						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code, OriginalTTL: origTTL}, nil
+						var transportInfo *hop.TransportInfo
+						if t.config.Decode {
+							transportInfo = ExtractTransportInfo(body.Data, ipHdrSize, string(t.config.Protocol))
+						}
+						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, IPID: ipid, ICMPType: 3, ICMPCode: rm.Code, OriginalTTL: origTTL, TransportInfo: transportInfo}, nil
 					}
 				}
 			}
