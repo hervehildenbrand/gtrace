@@ -298,3 +298,10 @@ func TestTraceResult_TotalHops_ReturnsCount(t *testing.T) {
 		t.Errorf("expected 3 hops, got %d", tr.TotalHops())
 	}
 }
+
+func TestProbeTransportInfoNilByDefault(t *testing.T) {
+	p := Probe{}
+	if p.TransportInfo != nil {
+		t.Error("TransportInfo should be nil by default")
+	}
+}

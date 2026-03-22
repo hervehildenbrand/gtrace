@@ -14,6 +14,7 @@ import (
 type SimpleRenderer struct {
 	ShowASN      bool
 	ShowHostname bool
+	ShowDecode   bool
 }
 
 // NewSimpleRenderer creates a new SimpleRenderer with default settings.
@@ -85,6 +86,11 @@ func (r *SimpleRenderer) RenderHop(h *hop.Hop) string {
 		if h.NAT {
 			parts = append(parts, "[NAT]")
 		}
+
+		// Decode indicator (transport header info)
+		if indicator := r.decodeIndicator(h); indicator != "" {
+			parts = append(parts, indicator)
+		}
 	}
 
 	// MTU indicator (outside if/else: EMSGSIZE causes all-timeout hops with MTU set)
@@ -143,6 +149,39 @@ func (r *SimpleRenderer) icmpCodeIndicator(h *hop.Hop) string {
 			case 9, 10, 13:
 				return "[!X]"
 			}
+		}
+	}
+	return ""
+}
+
+// decodeIndicator returns transport header decode indicators for a hop.
+// Shows DSCP, DF flag, port mappings, and TCP flags when --decode is enabled.
+func (r *SimpleRenderer) decodeIndicator(h *hop.Hop) string {
+	if !r.ShowDecode {
+		return ""
+	}
+	for _, p := range h.Probes {
+		if p.TransportInfo == nil {
+			continue
+		}
+		ti := p.TransportInfo
+		var parts []string
+		if ti.DSCP != 0 {
+			parts = append(parts, fmt.Sprintf("[DSCP:%d]", ti.DSCP))
+		}
+		if ti.DF {
+			parts = append(parts, "[DF]")
+		}
+		if ti.TCPSrcPort != 0 {
+			parts = append(parts, fmt.Sprintf("[%d→%d]", ti.TCPSrcPort, ti.TCPDstPort))
+		} else if ti.UDPSrcPort != 0 {
+			parts = append(parts, fmt.Sprintf("[%d→%d]", ti.UDPSrcPort, ti.UDPDstPort))
+		}
+		if ti.TCPFlagsStr != "" {
+			parts = append(parts, fmt.Sprintf("[TCP:%s]", ti.TCPFlagsStr))
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, " ")
 		}
 	}
 	return ""

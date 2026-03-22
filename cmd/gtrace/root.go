@@ -58,6 +58,7 @@ type Config struct {
 	ECMPFlows   int  // ECMP flow variations per hop (0=disabled)
 	DiscoverMTU bool // Enable Path MTU Discovery
 	ProbeSize   int  // Probe packet size in bytes
+	Decode      bool // Extract transport header info from ICMP errors
 
 	updateResult <-chan *update.CheckResult
 }
@@ -271,6 +272,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	cmd.Flags().IntVar(&cfg.ECMPFlows, "ecmp-flows", 0, "ECMP flow variations per hop (0=disabled, 8=recommended)")
 	cmd.Flags().BoolVar(&cfg.DiscoverMTU, "discover-mtu", false, "Enable Path MTU Discovery")
 	cmd.Flags().IntVar(&cfg.ProbeSize, "probe-size", 64, "Probe packet size in bytes")
+	cmd.Flags().BoolVarP(&cfg.Decode, "decode", "D", false, "Decode transport headers from ICMP error bodies")
 
 	return cmd
 }
@@ -373,6 +375,7 @@ func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.T
 			ECMPFlows:     cfg.ECMPFlows,
 			DiscoverMTU:   cfg.DiscoverMTU,
 			ProbeSize:     cfg.ProbeSize,
+			Decode:        cfg.Decode,
 		}
 
 		// Create tracer
@@ -412,6 +415,7 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	// Create tracer
@@ -449,15 +453,16 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 			}
 
 			msg := display.ProbeResultMsg{
-				TTL:      pr.TTL,
-				IP:       pr.IP,
-				RTT:      pr.RTT,
-				Timeout:  pr.Timeout,
-				MPLS:     pr.MPLS,
-				ICMPType:    pr.ICMPType,
-				ICMPCode:    pr.ICMPCode,
-				OriginalTTL: pr.OriginalTTL,
-				FlowID:      pr.FlowID,
+				TTL:           pr.TTL,
+				IP:            pr.IP,
+				RTT:           pr.RTT,
+				Timeout:       pr.Timeout,
+				MPLS:          pr.MPLS,
+				ICMPType:      pr.ICMPType,
+				ICMPCode:      pr.ICMPCode,
+				OriginalTTL:   pr.OriginalTTL,
+				FlowID:        pr.FlowID,
+				TransportInfo: pr.TransportInfo,
 			}
 
 			// Enrich first occurrence of each IP
@@ -542,6 +547,7 @@ func runLocalTraceMultiMTR(ctx context.Context, cmd *cobra.Command, cfg *Config,
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	tracers := make([]trace.Tracer, len(targets))
@@ -589,15 +595,16 @@ func runLocalTraceMultiMTR(ctx context.Context, cmd *cobra.Command, cfg *Config,
 			msg := display.MultiProbeResultMsg{
 				TargetIndex: targetIndex,
 				Probe: display.ProbeResultMsg{
-					TTL:         pr.TTL,
-					IP:          pr.IP,
-					RTT:         pr.RTT,
-					Timeout:     pr.Timeout,
-					MPLS:        pr.MPLS,
-					ICMPType:    pr.ICMPType,
-					ICMPCode:    pr.ICMPCode,
-					OriginalTTL: pr.OriginalTTL,
-					FlowID:      pr.FlowID,
+					TTL:           pr.TTL,
+					IP:            pr.IP,
+					RTT:           pr.RTT,
+					Timeout:       pr.Timeout,
+					MPLS:          pr.MPLS,
+					ICMPType:      pr.ICMPType,
+					ICMPCode:      pr.ICMPCode,
+					OriginalTTL:   pr.OriginalTTL,
+					FlowID:        pr.FlowID,
+					TransportInfo: pr.TransportInfo,
 				},
 			}
 
@@ -693,6 +700,7 @@ func runLocalTraceWithTUI(ctx context.Context, cmd *cobra.Command, cfg *Config, 
 func runLocalTraceSimple(ctx context.Context, cmd *cobra.Command, cfg *Config, tracer trace.Tracer, enricher enrich.EnricherInterface, targetIP net.IP) (*hop.TraceResult, error) {
 	// Create renderer
 	renderer := display.NewSimpleRenderer()
+	renderer.ShowDecode = cfg.Decode
 
 	// Print header
 	fmt.Fprintf(cmd.OutOrStdout(), "traceroute to %s (%s), %d hops max, %s protocol\n",
@@ -776,6 +784,7 @@ func runGlobalPingTraceroute(ctx context.Context, cmd *cobra.Command, cfg *Confi
 
 	// Create renderer
 	renderer := display.NewSimpleRenderer()
+	renderer.ShowDecode = cfg.Decode
 
 	// Display results from each probe
 	var lastResult *hop.TraceResult
@@ -1043,6 +1052,7 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	// Create tracer
@@ -1167,6 +1177,7 @@ func runMonitor(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	// Create tracer

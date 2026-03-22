@@ -95,6 +95,7 @@ func (h *handlers) handleTraceroute(ctx context.Context, req mcp.CallToolRequest
 	if v := req.GetInt("probe_size", 0); v > 0 {
 		cfg.ProbeSize = v
 	}
+	cfg.Decode = req.GetBool("decode", false)
 
 	if err := cfg.Validate(); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("invalid configuration: %v", err)), nil
@@ -158,6 +159,7 @@ func (h *handlers) handleMTR(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	if v := req.GetInt("ecmp_flows", 0); v > 0 {
 		cfg.ECMPFlows = v
 	}
+	cfg.Decode = req.GetBool("decode", false)
 
 	cycles := req.GetInt("cycles", 10)
 	if cycles < 1 {
@@ -224,6 +226,10 @@ func (h *handlers) handleMTR(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		}
 		if len(pr.MPLS) > 0 {
 			s.SetMPLS(pr.MPLS)
+		}
+		// Track TransportInfo for decode mode
+		if pr.TransportInfo != nil {
+			s.LastTransportInfo = pr.TransportInfo
 		}
 	}
 

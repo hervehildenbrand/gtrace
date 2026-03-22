@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,6 +192,63 @@ func TestJSONExporter_Export_AllICMPCodes(t *testing.T) {
 				t.Errorf("code %d: expected %q, got %q", tt.code, tt.expected, result.Hops[0].ICMPCode)
 			}
 		})
+	}
+}
+
+func TestJSONExport_DecodeField(t *testing.T) {
+	tr := &hop.TraceResult{
+		Hops: []*hop.Hop{{
+			TTL: 1,
+			Probes: []hop.Probe{{
+				IP:  net.ParseIP("1.2.3.4"),
+				RTT: time.Millisecond,
+				TransportInfo: &hop.TransportInfo{
+					DSCP:        46,
+					DF:          true,
+					TCPSrcPort:  12345,
+					TCPDstPort:  80,
+					TCPFlagsStr: "SYN",
+				},
+			}},
+		}},
+	}
+	var buf bytes.Buffer
+	e := NewJSONExporter()
+	e.Pretty = true
+	err := e.Export(&buf, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, `"dscp": 46`) {
+		t.Error("expected DSCP in JSON output")
+	}
+	if !strings.Contains(output, `"tcpFlags": "SYN"`) {
+		t.Error("expected TCP flags in JSON output")
+	}
+	if !strings.Contains(output, `"df": true`) {
+		t.Error("expected DF in JSON output")
+	}
+}
+
+func TestJSONExport_NoDecodeWhenNil(t *testing.T) {
+	tr := &hop.TraceResult{
+		Hops: []*hop.Hop{{
+			TTL: 1,
+			Probes: []hop.Probe{{
+				IP:  net.ParseIP("1.2.3.4"),
+				RTT: time.Millisecond,
+			}},
+		}},
+	}
+	var buf bytes.Buffer
+	e := NewJSONExporter()
+	err := e.Export(&buf, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "decode") {
+		t.Error("decode field should not appear when TransportInfo is nil")
 	}
 }
 

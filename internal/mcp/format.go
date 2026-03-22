@@ -152,6 +152,14 @@ func formatHop(sb *strings.Builder, h *hop.Hop) {
 		}
 	}
 
+	// TransportInfo (decoded header info)
+	for _, p := range h.Probes {
+		if p.TransportInfo != nil {
+			formatTransportInfo(sb, p.TransportInfo)
+			break
+		}
+	}
+
 	// NAT
 	if h.NAT {
 		sb.WriteString("    [NAT detected]\n")
@@ -267,6 +275,11 @@ func formatMTRStats(stats map[int]*display.HopStats, cycles int, target string) 
 			fmt.Fprintf(&sb, "    [ecmp_type: %s]\n", s.ECMPClassified)
 		}
 
+		// TransportInfo (decoded header info)
+		if s.LastTransportInfo != nil {
+			formatTransportInfo(&sb, s.LastTransportInfo)
+		}
+
 		// ECMP sub-rows
 		if s.HasECMP() {
 			for _, ipInfo := range s.SortedIPs() {
@@ -349,6 +362,30 @@ func formatGeoResult(result *enrich.GeoResult) string {
 // formatRDNSResult formats a reverse DNS lookup result.
 func formatRDNSResult(ip, hostname string) string {
 	return fmt.Sprintf("IP:       %s\nHostname: %s\n", ip, hostname)
+}
+
+// formatTransportInfo formats decoded transport header info.
+func formatTransportInfo(sb *strings.Builder, ti *hop.TransportInfo) {
+	var parts []string
+
+	if ti.DSCP != 0 {
+		parts = append(parts, fmt.Sprintf("DSCP:%d", ti.DSCP))
+	}
+	if ti.DF {
+		parts = append(parts, "DF")
+	}
+	if ti.TCPFlagsStr != "" {
+		parts = append(parts, fmt.Sprintf("TCP:%s", ti.TCPFlagsStr))
+	}
+	if ti.TCPSrcPort != 0 {
+		parts = append(parts, fmt.Sprintf("port:%d→%d", ti.TCPSrcPort, ti.TCPDstPort))
+	} else if ti.UDPSrcPort != 0 {
+		parts = append(parts, fmt.Sprintf("port:%d→%d", ti.UDPSrcPort, ti.UDPDstPort))
+	}
+
+	if len(parts) > 0 {
+		fmt.Fprintf(sb, "    [%s]\n", strings.Join(parts, " "))
+	}
 }
 
 // icmpCodeText returns a human-readable description of an ICMP Dest Unreachable code.
