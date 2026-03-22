@@ -698,6 +698,7 @@ func runLocalTraceWithTUI(ctx context.Context, cmd *cobra.Command, cfg *Config, 
 func runLocalTraceSimple(ctx context.Context, cmd *cobra.Command, cfg *Config, tracer trace.Tracer, enricher enrich.EnricherInterface, targetIP net.IP) (*hop.TraceResult, error) {
 	// Create renderer
 	renderer := display.NewSimpleRenderer()
+	renderer.ShowDecode = cfg.Decode
 
 	// Print header
 	fmt.Fprintf(cmd.OutOrStdout(), "traceroute to %s (%s), %d hops max, %s protocol\n",
@@ -781,6 +782,7 @@ func runGlobalPingTraceroute(ctx context.Context, cmd *cobra.Command, cfg *Confi
 
 	// Create renderer
 	renderer := display.NewSimpleRenderer()
+	renderer.ShowDecode = cfg.Decode
 
 	// Display results from each probe
 	var lastResult *hop.TraceResult
