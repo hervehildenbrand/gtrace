@@ -67,6 +67,9 @@ func tracerouteTool() mcp.Tool {
 		mcp.WithNumber("probe_size",
 			mcp.Description("Probe packet size in bytes (default: 64)"),
 		),
+		mcp.WithBoolean("decode",
+			mcp.Description("Decode transport headers from ICMP error bodies (shows DSCP, DF, TCP flags, port translation)"),
+		),
 	)
 }
 
@@ -98,6 +101,9 @@ func mtrTool() mcp.Tool {
 		),
 		mcp.WithNumber("ecmp_flows",
 			mcp.Description("ECMP flow variations per hop (0=disabled)"),
+		),
+		mcp.WithBoolean("decode",
+			mcp.Description("Decode transport headers from ICMP error bodies (shows DSCP, DF, TCP flags, port translation)"),
 		),
 	)
 }
