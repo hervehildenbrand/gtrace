@@ -41,9 +41,25 @@ type ExportedHop struct {
 
 // ExportedProbe is the JSON representation of a single probe.
 type ExportedProbe struct {
-	IP      string  `json:"ip,omitempty"`
-	RTT     float64 `json:"rtt,omitempty"` // in ms
-	Timeout bool    `json:"timeout,omitempty"`
+	IP      string                  `json:"ip,omitempty"`
+	RTT     float64                 `json:"rtt,omitempty"` // in ms
+	Timeout bool                    `json:"timeout,omitempty"`
+	Decode  *ExportedTransportInfo  `json:"decode,omitempty"`
+}
+
+// ExportedTransportInfo is the JSON representation of decoded transport header info.
+type ExportedTransportInfo struct {
+	DSCP        int    `json:"dscp,omitempty"`
+	ECN         int    `json:"ecn,omitempty"`
+	DF          bool   `json:"df,omitempty"`
+	TCPSrcPort  uint16 `json:"tcpSrcPort,omitempty"`
+	TCPDstPort  uint16 `json:"tcpDstPort,omitempty"`
+	TCPSeqNum   uint32 `json:"tcpSeqNum,omitempty"`
+	TCPFlags    string `json:"tcpFlags,omitempty"`
+	UDPSrcPort  uint16 `json:"udpSrcPort,omitempty"`
+	UDPDstPort  uint16 `json:"udpDstPort,omitempty"`
+	UDPLength   uint16 `json:"udpLength,omitempty"`
+	UDPChecksum uint16 `json:"udpChecksum,omitempty"`
 }
 
 // ExportedMPLS is the JSON representation of an MPLS label.
@@ -144,11 +160,30 @@ func (e *JSONExporter) convertProbe(p hop.Probe) ExportedProbe {
 		ip = p.IP.String()
 	}
 
-	return ExportedProbe{
+	exported := ExportedProbe{
 		IP:      ip,
 		RTT:     float64(p.RTT) / float64(time.Millisecond),
 		Timeout: p.Timeout,
 	}
+
+	if p.TransportInfo != nil {
+		ti := p.TransportInfo
+		exported.Decode = &ExportedTransportInfo{
+			DSCP:        ti.DSCP,
+			ECN:         ti.ECN,
+			DF:          ti.DF,
+			TCPSrcPort:  ti.TCPSrcPort,
+			TCPDstPort:  ti.TCPDstPort,
+			TCPSeqNum:   ti.TCPSeqNum,
+			TCPFlags:    ti.TCPFlagsStr,
+			UDPSrcPort:  ti.UDPSrcPort,
+			UDPDstPort:  ti.UDPDstPort,
+			UDPLength:   ti.UDPLength,
+			UDPChecksum: ti.UDPChecksum,
+		}
+	}
+
+	return exported
 }
 
 // icmpCodeForExport returns a human-readable ICMP Dest Unreachable code for export.
