@@ -7,17 +7,40 @@ import (
 	"time"
 )
 
+// TransportInfo contains decoded header fields from the original datagram
+// embedded in ICMP error responses.
+type TransportInfo struct {
+	// IP header fields
+	DSCP int  // Differentiated Services Code Point (TOS byte, top 6 bits)
+	ECN  int  // Explicit Congestion Notification (TOS byte, bottom 2 bits)
+	DF   bool // Don't Fragment flag
+
+	// TCP fields (protocol=tcp only)
+	TCPSrcPort  uint16
+	TCPDstPort  uint16
+	TCPSeqNum   uint32
+	TCPFlags    uint8  // Raw flags byte
+	TCPFlagsStr string // Human-readable: "SYN", "SYN-ACK", etc.
+
+	// UDP fields (protocol=udp only)
+	UDPSrcPort  uint16
+	UDPDstPort  uint16
+	UDPLength   uint16
+	UDPChecksum uint16
+}
+
 // Probe represents a single traceroute probe result.
 type Probe struct {
-	IP          net.IP
-	RTT         time.Duration
-	Timeout     bool
-	ResponseTTL int    // TTL from response packet (for NAT detection)
-	IPID        uint16 // IP ID from original datagram in ICMP error
-	ICMPType    int    // ICMP message type (0 = not set)
-	ICMPCode    int    // ICMP message code (meaningful for Dest Unreachable)
-	OriginalTTL int    // TTL from original datagram in ICMP error (-1 = not set)
-	FlowID      int    // ECMP flow identifier (0 = not tracked)
+	IP            net.IP
+	RTT           time.Duration
+	Timeout       bool
+	ResponseTTL   int            // TTL from response packet (for NAT detection)
+	IPID          uint16         // IP ID from original datagram in ICMP error
+	ICMPType      int            // ICMP message type (0 = not set)
+	ICMPCode      int            // ICMP message code (meaningful for Dest Unreachable)
+	OriginalTTL   int            // TTL from original datagram in ICMP error (-1 = not set)
+	FlowID        int            // ECMP flow identifier (0 = not tracked)
+	TransportInfo *TransportInfo // Decoded header info (nil if --decode not used)
 }
 
 // MPLSLabel represents an MPLS label from ICMP extensions (RFC 4950).
