@@ -43,6 +43,7 @@ type Config struct {
 	ECMPFlows     int    // ECMP flow variations per hop (0=disabled)
 	DiscoverMTU   bool   // Enable Path MTU Discovery
 	ProbeSize     int    // Probe packet size in bytes
+	Decode        bool   // Extract transport header info from ICMP errors
 }
 
 // DefaultConfig returns the default traceroute configuration.

@@ -58,6 +58,7 @@ type Config struct {
 	ECMPFlows   int  // ECMP flow variations per hop (0=disabled)
 	DiscoverMTU bool // Enable Path MTU Discovery
 	ProbeSize   int  // Probe packet size in bytes
+	Decode      bool // Extract transport header info from ICMP errors
 
 	updateResult <-chan *update.CheckResult
 }
@@ -271,6 +272,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	cmd.Flags().IntVar(&cfg.ECMPFlows, "ecmp-flows", 0, "ECMP flow variations per hop (0=disabled, 8=recommended)")
 	cmd.Flags().BoolVar(&cfg.DiscoverMTU, "discover-mtu", false, "Enable Path MTU Discovery")
 	cmd.Flags().IntVar(&cfg.ProbeSize, "probe-size", 64, "Probe packet size in bytes")
+	cmd.Flags().BoolVarP(&cfg.Decode, "decode", "D", false, "Decode transport headers from ICMP error bodies")
 
 	return cmd
 }
@@ -373,6 +375,7 @@ func runLocalTrace(ctx context.Context, cmd *cobra.Command, cfg *Config) (*hop.T
 			ECMPFlows:     cfg.ECMPFlows,
 			DiscoverMTU:   cfg.DiscoverMTU,
 			ProbeSize:     cfg.ProbeSize,
+			Decode:        cfg.Decode,
 		}
 
 		// Create tracer
@@ -412,6 +415,7 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	// Create tracer
@@ -542,6 +546,7 @@ func runLocalTraceMultiMTR(ctx context.Context, cmd *cobra.Command, cfg *Config,
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	tracers := make([]trace.Tracer, len(targets))
@@ -1043,6 +1048,7 @@ func runLocalTraceForCompare(ctx context.Context, cfg *Config) (*hop.TraceResult
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	// Create tracer
@@ -1167,6 +1173,7 @@ func runMonitor(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
 		ECMPFlows:     cfg.ECMPFlows,
 		DiscoverMTU:   cfg.DiscoverMTU,
 		ProbeSize:     cfg.ProbeSize,
+		Decode:        cfg.Decode,
 	}
 
 	// Create tracer
