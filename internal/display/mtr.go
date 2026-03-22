@@ -16,16 +16,17 @@ import (
 
 // ProbeResultMsg is sent when a probe result is received.
 type ProbeResultMsg struct {
-	TTL        int
-	IP         net.IP
-	RTT        time.Duration
-	Timeout    bool
-	MPLS       []hop.MPLSLabel
-	Enrichment hop.Enrichment
-	ICMPType    int
-	ICMPCode    int
-	OriginalTTL int // -1 = not set
-	FlowID      int // ECMP flow identifier (0 = not tracked)
+	TTL           int
+	IP            net.IP
+	RTT           time.Duration
+	Timeout       bool
+	MPLS          []hop.MPLSLabel
+	Enrichment    hop.Enrichment
+	ICMPType      int
+	ICMPCode      int
+	OriginalTTL   int                // -1 = not set
+	FlowID        int                // ECMP flow identifier (0 = not tracked)
+	TransportInfo *hop.TransportInfo // Decoded transport header info (nil if --decode not used)
 }
 
 // CycleCompleteMsg is sent when a trace cycle completes.
@@ -212,6 +213,11 @@ func (m *MTRModel) handleProbeResult(msg ProbeResultMsg) {
 		// Update MPLS labels
 		if len(msg.MPLS) > 0 {
 			stats.SetMPLS(msg.MPLS)
+		}
+
+		// Track transport info for decode display
+		if msg.TransportInfo != nil {
+			stats.LastTransportInfo = msg.TransportInfo
 		}
 	}
 }
@@ -425,6 +431,23 @@ func (m *MTRModel) formatStatsRow(stats *HopStats) string {
 	if len(stats.MPLS) > 0 {
 		b.WriteString(" ")
 		b.WriteString(mplsStyle.Render("[MPLS]"))
+	}
+
+	// Decode indicators (transport header info)
+	if stats.LastTransportInfo != nil {
+		ti := stats.LastTransportInfo
+		if ti.DSCP != 0 {
+			b.WriteString(" ")
+			b.WriteString(asnStyle.Render(fmt.Sprintf("[DSCP:%d]", ti.DSCP)))
+		}
+		if ti.DF {
+			b.WriteString(" ")
+			b.WriteString(asnStyle.Render("[DF]"))
+		}
+		if ti.TCPFlagsStr != "" {
+			b.WriteString(" ")
+			b.WriteString(asnStyle.Render(fmt.Sprintf("[TCP:%s]", ti.TCPFlagsStr)))
+		}
 	}
 
 	return b.String()

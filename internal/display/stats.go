@@ -41,8 +41,9 @@ type HopStats struct {
 	LastICMPType    int                      // Last ICMP type seen (for code reporting)
 	LastICMPCode    int                      // Last ICMP code seen (for code reporting)
 	TTLManipulated  bool                     // Original datagram TTL mismatch detected
-	FlowPaths       map[int]map[string]int   // flowID → IP string → hit count
-	ECMPClassified  string                   // "per_flow", "per_packet", "unknown", or ""
+	FlowPaths         map[int]map[string]int   // flowID → IP string → hit count
+	ECMPClassified    string                   // "per_flow", "per_packet", "unknown", or ""
+	LastTransportInfo *hop.TransportInfo       // Last decoded transport header info
 }
 
 // NewHopStats creates a new HopStats for the given TTL.

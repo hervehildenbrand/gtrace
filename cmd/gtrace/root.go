@@ -453,15 +453,16 @@ func runLocalTraceMTR(ctx context.Context, cmd *cobra.Command, cfg *Config, enri
 			}
 
 			msg := display.ProbeResultMsg{
-				TTL:      pr.TTL,
-				IP:       pr.IP,
-				RTT:      pr.RTT,
-				Timeout:  pr.Timeout,
-				MPLS:     pr.MPLS,
-				ICMPType:    pr.ICMPType,
-				ICMPCode:    pr.ICMPCode,
-				OriginalTTL: pr.OriginalTTL,
-				FlowID:      pr.FlowID,
+				TTL:           pr.TTL,
+				IP:            pr.IP,
+				RTT:           pr.RTT,
+				Timeout:       pr.Timeout,
+				MPLS:          pr.MPLS,
+				ICMPType:      pr.ICMPType,
+				ICMPCode:      pr.ICMPCode,
+				OriginalTTL:   pr.OriginalTTL,
+				FlowID:        pr.FlowID,
+				TransportInfo: pr.TransportInfo,
 			}
 
 			// Enrich first occurrence of each IP
@@ -594,15 +595,16 @@ func runLocalTraceMultiMTR(ctx context.Context, cmd *cobra.Command, cfg *Config,
 			msg := display.MultiProbeResultMsg{
 				TargetIndex: targetIndex,
 				Probe: display.ProbeResultMsg{
-					TTL:         pr.TTL,
-					IP:          pr.IP,
-					RTT:         pr.RTT,
-					Timeout:     pr.Timeout,
-					MPLS:        pr.MPLS,
-					ICMPType:    pr.ICMPType,
-					ICMPCode:    pr.ICMPCode,
-					OriginalTTL: pr.OriginalTTL,
-					FlowID:      pr.FlowID,
+					TTL:           pr.TTL,
+					IP:            pr.IP,
+					RTT:           pr.RTT,
+					Timeout:       pr.Timeout,
+					MPLS:          pr.MPLS,
+					ICMPType:      pr.ICMPType,
+					ICMPCode:      pr.ICMPCode,
+					OriginalTTL:   pr.OriginalTTL,
+					FlowID:        pr.FlowID,
+					TransportInfo: pr.TransportInfo,
 				},
 			}
 
