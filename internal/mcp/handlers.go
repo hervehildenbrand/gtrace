@@ -429,10 +429,14 @@ func (h *handlers) handleDNS(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		opts.Port = v
 	}
 	opts.Trace = req.GetBool("trace", false)
-	if req.GetBool("ipv4", false) {
-		opts.IPVersion = 4
-	} else if req.GetBool("ipv6", false) {
-		opts.IPVersion = 6
+	// Only set IPVersion when resolver is not already an IP address
+	resolverIsIP := opts.Resolver != "" && net.ParseIP(opts.Resolver) != nil
+	if !resolverIsIP {
+		if req.GetBool("ipv4", false) {
+			opts.IPVersion = 4
+		} else if req.GetBool("ipv6", false) {
+			opts.IPVersion = 6
+		}
 	}
 
 	measReq := &globalping.MeasurementRequest{

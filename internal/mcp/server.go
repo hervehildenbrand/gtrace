@@ -281,7 +281,7 @@ Examples:
 		),
 		mcp.WithString("query_type",
 			mcp.Description("DNS record type (default: A)"),
-			mcp.Enum("A", "AAAA", "MX", "NS", "TXT", "CNAME", "SOA", "PTR", "SRV", "CAA"),
+			mcp.Enum("A", "AAAA", "ANY", "CNAME", "DNSKEY", "DS", "HTTPS", "MX", "NS", "NSEC", "PTR", "RRSIG", "SOA", "TXT", "SRV", "SVCB"),
 		),
 		mcp.WithString("resolver",
 			mcp.Description("Custom DNS resolver IP or FQDN (default: probe's system resolver)"),

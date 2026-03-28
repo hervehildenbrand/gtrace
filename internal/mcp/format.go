@@ -398,7 +398,11 @@ func formatDNSResults(results []globalping.DNSProbeResult, target string, trace 
 		if r.Resolver != "" {
 			fmt.Fprintf(&sb, "Resolver: %s\n", r.Resolver)
 		}
-		fmt.Fprintf(&sb, "Status: %s (%d)\n", r.StatusCodeName, r.StatusCode)
+		statusName := r.StatusCodeName
+		if statusName == "" {
+			statusName = dnsStatusCodeName(r.StatusCode)
+		}
+		fmt.Fprintf(&sb, "Status: %s (%d)\n", statusName, r.StatusCode)
 		if r.Timings.Total > 0 {
 			fmt.Fprintf(&sb, "Query time: %.1f ms\n", r.Timings.Total)
 		}
@@ -413,6 +417,26 @@ func formatDNSResults(results []globalping.DNSProbeResult, target string, trace 
 	}
 
 	return sb.String()
+}
+
+// dnsStatusCodeName returns a fallback name for a DNS RCODE.
+func dnsStatusCodeName(code int) string {
+	switch code {
+	case 0:
+		return "NOERROR"
+	case 1:
+		return "FORMERR"
+	case 2:
+		return "SERVFAIL"
+	case 3:
+		return "NXDOMAIN"
+	case 4:
+		return "NOTIMP"
+	case 5:
+		return "REFUSED"
+	default:
+		return fmt.Sprintf("RCODE%d", code)
+	}
 }
 
 // formatASNResult formats an ASN lookup result.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -54,13 +55,14 @@ Examples:
 			}
 
 			validTypes := map[string]bool{
-				"A": true, "AAAA": true, "MX": true, "NS": true,
-				"TXT": true, "CNAME": true, "SOA": true, "PTR": true,
-				"SRV": true, "CAA": true,
+				"A": true, "AAAA": true, "ANY": true, "CNAME": true,
+				"DNSKEY": true, "DS": true, "HTTPS": true, "MX": true,
+				"NS": true, "NSEC": true, "PTR": true, "RRSIG": true,
+				"SOA": true, "TXT": true, "SRV": true, "SVCB": true,
 			}
 			queryType = strings.ToUpper(queryType)
 			if !validTypes[queryType] {
-				return fmt.Errorf("invalid record type %q: must be A, AAAA, MX, NS, TXT, CNAME, SOA, PTR, SRV, or CAA", queryType)
+				return fmt.Errorf("invalid record type %q: must be one of A, AAAA, ANY, CNAME, DNSKEY, DS, HTTPS, MX, NS, NSEC, PTR, RRSIG, SOA, TXT, SRV, SVCB", queryType)
 			}
 
 			protocol = strings.ToLower(protocol)
@@ -85,10 +87,15 @@ Examples:
 			if resolver != "" {
 				opts.Resolver = resolver
 			}
-			if ipv4 {
-				opts.IPVersion = 4
-			} else if ipv6 {
-				opts.IPVersion = 6
+			// Only set IPVersion when both target and resolver are hostnames
+			// — the GlobalPing API rejects it when either is already an IP
+			resolverIsIP := resolver != "" && net.ParseIP(resolver) != nil
+			if !resolverIsIP {
+				if ipv4 {
+					opts.IPVersion = 4
+				} else if ipv6 {
+					opts.IPVersion = 6
+				}
 			}
 
 			req := &globalping.MeasurementRequest{
@@ -143,7 +150,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&from, "from", "", "Probe locations (required). Simple: 'Paris;Tokyo'. Structured: 'city:Tokyo,asn:2497'")
-	cmd.Flags().StringVar(&queryType, "type", "A", "DNS record type: A, AAAA, MX, NS, TXT, CNAME, SOA, PTR, SRV, CAA")
+	cmd.Flags().StringVar(&queryType, "type", "A", "DNS record type: A, AAAA, ANY, CNAME, DNSKEY, DS, HTTPS, MX, NS, NSEC, PTR, RRSIG, SOA, TXT, SRV, SVCB")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "Custom DNS resolver IP or FQDN")
 	cmd.Flags().StringVar(&protocol, "protocol", "udp", "Protocol: udp or tcp")
 	cmd.Flags().IntVar(&port, "port", 53, "DNS server port")
@@ -154,6 +161,26 @@ Examples:
 	cmd.Flags().StringVar(&apiKey, "api-key", "", "GlobalPing API key for higher rate limits")
 
 	return cmd
+}
+
+// dnsStatusCodeName returns a human-readable name for a DNS status code.
+func dnsStatusCodeName(code int) string {
+	switch code {
+	case 0:
+		return "NOERROR"
+	case 1:
+		return "FORMERR"
+	case 2:
+		return "SERVFAIL"
+	case 3:
+		return "NXDOMAIN"
+	case 4:
+		return "NOTIMP"
+	case 5:
+		return "REFUSED"
+	default:
+		return fmt.Sprintf("RCODE%d", code)
+	}
 }
 
 func displayDNSResult(cmd *cobra.Command, pr *globalping.DNSProbeResult, traceMode bool) {
@@ -174,7 +201,11 @@ func displayDNSResult(cmd *cobra.Command, pr *globalping.DNSProbeResult, traceMo
 		fmt.Fprintf(w, "Resolver: %s\n", r.Resolver)
 	}
 
-	fmt.Fprintf(w, "Status: %s (%d)\n", r.StatusCodeName, r.StatusCode)
+	statusName := r.StatusCodeName
+	if statusName == "" {
+		statusName = dnsStatusCodeName(r.StatusCode)
+	}
+	fmt.Fprintf(w, "Status: %s (%d)\n", statusName, r.StatusCode)
 
 	if r.Timings.Total > 0 {
 		fmt.Fprintf(w, "Query time: %.1f ms\n", r.Timings.Total)
