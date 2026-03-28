@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -37,7 +38,8 @@ Examples:
   gtrace ping example.com --from "Tokyo; London" --packets 5
   gtrace ping example.com --from "city:Tokyo,asn:2497" --protocol tcp --port 443
   gtrace ping 1.1.1.1 --from "country:US@3" -4 --json`,
-		Args: cobra.ExactArgs(1),
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 
@@ -73,10 +75,13 @@ Examples:
 			if protocol == "tcp" && port > 0 {
 				opts.Port = port
 			}
-			if ipv4 {
-				opts.IPVersion = 4
-			} else if ipv6 {
-				opts.IPVersion = 6
+			// Only set IPVersion for hostnames — GlobalPing rejects it for IP targets
+			if net.ParseIP(target) == nil {
+				if ipv4 {
+					opts.IPVersion = 4
+				} else if ipv6 {
+					opts.IPVersion = 6
+				}
 			}
 
 			req := &globalping.MeasurementRequest{
@@ -88,20 +93,24 @@ Examples:
 
 			client := globalping.NewClient(apiKey)
 			client.SetRetryCallback(func(attempt int, delay time.Duration) {
-				fmt.Fprintf(cmd.OutOrStdout(), "Rate limited. Retrying in %v (attempt %d/3)...\n", delay, attempt)
+				fmt.Fprintf(cmd.ErrOrStderr(), "Rate limited. Retrying in %v (attempt %d/3)...\n", delay, attempt)
 			})
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Ping %s from %s via GlobalPing\n", target, from)
-			fmt.Fprintln(cmd.OutOrStdout(), "Creating measurement...")
+			if !jsonOut {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Ping %s from %s via GlobalPing\n", target, from)
+				fmt.Fprintln(cmd.ErrOrStderr(), "Creating measurement...")
+			}
 
 			resp, err := client.CreateMeasurement(ctx, req)
 			if err != nil {
 				return fmt.Errorf("failed to create measurement: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Measurement ID: %s (%d probe%s)\n",
-				resp.ID, resp.ProbesCount, pluralS(resp.ProbesCount))
-			fmt.Fprintln(cmd.OutOrStdout(), "Waiting for results...")
+			if !jsonOut {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Measurement ID: %s (%d probe%s)\n",
+					resp.ID, resp.ProbesCount, pluralS(resp.ProbesCount))
+				fmt.Fprintln(cmd.ErrOrStderr(), "Waiting for results...")
+			}
 
 			result, err := client.WaitForPingMeasurement(ctx, resp.ID)
 			if err != nil {

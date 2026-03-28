@@ -370,10 +370,13 @@ func (h *handlers) handlePing(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if v := req.GetInt("packets", 0); v > 0 {
 		opts.Packets = v
 	}
-	if req.GetBool("ipv4", false) {
-		opts.IPVersion = 4
-	} else if req.GetBool("ipv6", false) {
-		opts.IPVersion = 6
+	// Only set IPVersion for hostname targets — API rejects it for IPs
+	if net.ParseIP(target) == nil {
+		if req.GetBool("ipv4", false) {
+			opts.IPVersion = 4
+		} else if req.GetBool("ipv6", false) {
+			opts.IPVersion = 6
+		}
 	}
 
 	measReq := &globalping.MeasurementRequest{
