@@ -208,6 +208,15 @@ type MeasurementOptions struct {
 	Port      int    `json:"port,omitempty"`      // Destination port
 	Packets   int    `json:"packets,omitempty"`   // Number of packets
 	IPVersion int    `json:"ipVersion,omitempty"` // IP version: 4 or 6 (default: auto)
+	// DNS-specific options
+	Query    *DNSQuery `json:"query,omitempty"`
+	Resolver string    `json:"resolver,omitempty"`
+	Trace    bool      `json:"trace,omitempty"`
+}
+
+// DNSQuery specifies the DNS query type.
+type DNSQuery struct {
+	Type string `json:"type,omitempty"` // A, AAAA, MX, NS, TXT, CNAME, SOA, PTR, SRV, etc.
 }
 
 // MeasurementRequest represents a request to create a measurement.
@@ -534,4 +543,106 @@ type MTRMeasurementResult struct {
 	CreatedAt time.Time        `json:"createdAt"`
 	UpdatedAt time.Time        `json:"updatedAt"`
 	Results   []MTRProbeResult `json:"results"`
+}
+
+// Ping measurement types
+
+// PingStats contains statistics for a ping measurement.
+type PingStats struct {
+	Min   *float64 `json:"min"`   // nullable — null when all packets lost
+	Avg   *float64 `json:"avg"`   // nullable
+	Max   *float64 `json:"max"`   // nullable
+	Total int      `json:"total"`
+	Rcv   int      `json:"rcv"`
+	Drop  int      `json:"drop"`
+	Loss  float64  `json:"loss"` // 0-100
+}
+
+// PingTiming contains timing information for a single ping.
+type PingTiming struct {
+	RTT float64 `json:"rtt"`           // Round-trip time in ms
+	TTL int     `json:"ttl,omitempty"` // ICMP only
+}
+
+// PingResult contains the ping measurement data from a single probe.
+type PingResult struct {
+	Status           string       `json:"status"`
+	RawOutput        string       `json:"rawOutput"`
+	ResolvedAddress  string       `json:"resolvedAddress"`
+	ResolvedHostname string       `json:"resolvedHostname"`
+	Stats            PingStats    `json:"stats"`
+	Timings          []PingTiming `json:"timings"`
+}
+
+// PingProbeResult contains ping results from a single probe.
+type PingProbeResult struct {
+	Probe  ProbeInfo  `json:"probe"`
+	Result PingResult `json:"result"`
+}
+
+// PingMeasurementResult contains the full ping measurement results.
+type PingMeasurementResult struct {
+	ID        string            `json:"id"`
+	Type      MeasurementType   `json:"type"`
+	Status    MeasurementStatus `json:"status"`
+	CreatedAt time.Time         `json:"createdAt"`
+	UpdatedAt time.Time         `json:"updatedAt"`
+	Results   []PingProbeResult `json:"results"`
+}
+
+// DNS measurement types
+
+// DNSAnswer represents a single DNS answer record.
+type DNSAnswer struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	TTL   int    `json:"ttl"`
+	Class string `json:"class"`
+	Value string `json:"value"`
+}
+
+// DNSTiming contains timing information for a DNS query.
+type DNSTiming struct {
+	Total float64 `json:"total"` // Total query time in ms
+}
+
+// DNSResult contains the DNS measurement data from a single probe.
+type DNSResult struct {
+	Status         string      `json:"status"`
+	RawOutput      string      `json:"rawOutput"`
+	StatusCode     int         `json:"statusCode"`
+	StatusCodeName string      `json:"statusCodeName"`
+	Resolver       string      `json:"resolver"`
+	Answers        []DNSAnswer `json:"answers"`
+	Timings        DNSTiming   `json:"timings"`
+}
+
+// DNSTraceHop represents a single hop in a DNS delegation trace.
+type DNSTraceHop struct {
+	Resolver string      `json:"resolver"`
+	Answers  []DNSAnswer `json:"answers"`
+	Timings  DNSTiming   `json:"timings"`
+}
+
+// DNSTraceResult contains the DNS trace measurement data.
+type DNSTraceResult struct {
+	Status    string        `json:"status"`
+	RawOutput string        `json:"rawOutput"`
+	Hops      []DNSTraceHop `json:"hops"`
+}
+
+// DNSProbeResult contains DNS results from a single probe.
+type DNSProbeResult struct {
+	Probe  ProbeInfo `json:"probe"`
+	Result DNSResult `json:"result"`
+}
+
+// DNSMeasurementResult contains the full DNS measurement results.
+type DNSMeasurementResult struct {
+	ID        string           `json:"id"`
+	Type      MeasurementType  `json:"type"`
+	Status    MeasurementStatus `json:"status"`
+	CreatedAt time.Time        `json:"createdAt"`
+	UpdatedAt time.Time        `json:"updatedAt"`
+	Results   []DNSProbeResult `json:"results"`
 }
