@@ -400,3 +400,173 @@ func (c *Client) RunMTRMeasurement(ctx context.Context, req *MeasurementRequest)
 
 	return c.WaitForMTRMeasurement(ctx, resp.ID)
 }
+
+// GetPingMeasurement retrieves the current state of a ping measurement.
+func (c *Client) GetPingMeasurement(ctx context.Context, id string) (*PingMeasurementResult, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		result, err := c.getPingMeasurementOnce(ctx, id)
+		if err == nil {
+			return result, nil
+		}
+		if !isRateLimitError(err) {
+			return nil, err
+		}
+		lastErr = err
+		if attempt >= c.maxRetries {
+			break
+		}
+		if c.retryCallback != nil {
+			c.retryCallback(attempt+1, c.retryDelay)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(c.retryDelay):
+		}
+	}
+	return nil, lastErr
+}
+
+func (c *Client) getPingMeasurementOnce(ctx context.Context, id string) (*PingMeasurementResult, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v1/measurements/"+id, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	c.setHeaders(httpReq)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(body)}
+	}
+
+	var result PingMeasurementResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// WaitForPingMeasurement polls until the ping measurement is complete.
+func (c *Client) WaitForPingMeasurement(ctx context.Context, id string) (*PingMeasurementResult, error) {
+	ticker := time.NewTicker(c.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		result, err := c.GetPingMeasurement(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if result.Status.IsComplete() {
+			return result, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// RunPingMeasurement creates a ping measurement and waits for completion.
+func (c *Client) RunPingMeasurement(ctx context.Context, req *MeasurementRequest) (*PingMeasurementResult, error) {
+	req.Type = MeasurementTypePing
+
+	resp, err := c.CreateMeasurement(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create measurement: %w", err)
+	}
+	return c.WaitForPingMeasurement(ctx, resp.ID)
+}
+
+// GetDNSMeasurement retrieves the current state of a DNS measurement.
+func (c *Client) GetDNSMeasurement(ctx context.Context, id string) (*DNSMeasurementResult, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		result, err := c.getDNSMeasurementOnce(ctx, id)
+		if err == nil {
+			return result, nil
+		}
+		if !isRateLimitError(err) {
+			return nil, err
+		}
+		lastErr = err
+		if attempt >= c.maxRetries {
+			break
+		}
+		if c.retryCallback != nil {
+			c.retryCallback(attempt+1, c.retryDelay)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(c.retryDelay):
+		}
+	}
+	return nil, lastErr
+}
+
+func (c *Client) getDNSMeasurementOnce(ctx context.Context, id string) (*DNSMeasurementResult, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/v1/measurements/"+id, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	c.setHeaders(httpReq)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(body)}
+	}
+
+	var result DNSMeasurementResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// WaitForDNSMeasurement polls until the DNS measurement is complete.
+func (c *Client) WaitForDNSMeasurement(ctx context.Context, id string) (*DNSMeasurementResult, error) {
+	ticker := time.NewTicker(c.pollInterval)
+	defer ticker.Stop()
+
+	for {
+		result, err := c.GetDNSMeasurement(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if result.Status.IsComplete() {
+			return result, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// RunDNSMeasurement creates a DNS measurement and waits for completion.
+func (c *Client) RunDNSMeasurement(ctx context.Context, req *MeasurementRequest) (*DNSMeasurementResult, error) {
+	req.Type = MeasurementTypeDNS
+
+	resp, err := c.CreateMeasurement(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create measurement: %w", err)
+	}
+	return c.WaitForDNSMeasurement(ctx, resp.ID)
+}
