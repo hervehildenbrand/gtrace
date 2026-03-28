@@ -19,6 +19,8 @@ func NewServer(version, apiKey string) *server.MCPServer {
 	s.AddTool(tracerouteTool(), h.handleTraceroute)
 	s.AddTool(mtrTool(), h.handleMTR)
 	s.AddTool(globalPingTool(), h.handleGlobalPing)
+	s.AddTool(pingTool(), h.handlePing)
+	s.AddTool(dnsTool(), h.handleDNS)
 	s.AddTool(asnLookupTool(), h.handleASNLookup)
 	s.AddTool(geoLookupTool(), h.handleGeoLookup)
 	s.AddTool(reverseDNSTool(), h.handleReverseDNS)
@@ -213,6 +215,92 @@ func reverseDNSTool() mcp.Tool {
 		mcp.WithString("ip",
 			mcp.Required(),
 			mcp.Description("IP address to look up (IPv4 or IPv6)"),
+		),
+	)
+}
+
+func pingTool() mcp.Tool {
+	return mcp.NewTool("ping",
+		mcp.WithDescription(`Run a distributed ping from remote GlobalPing probe locations. Supports ICMP (default) and TCP ping. Returns packet loss stats and RTT measurements.
+
+Does not require root privileges. No API key needed (rate-limited); provide one for higher limits.
+
+Use list_probes to discover available probe locations first.
+
+Examples:
+- ICMP ping: target="8.8.8.8", from="Paris"
+- TCP ping to port 443: target="example.com", from="Tokyo", protocol="tcp", port=443
+- Multi-location: from="Paris; Tokyo; London"`),
+		mcp.WithString("target",
+			mcp.Required(),
+			mcp.Description("Target hostname or IP address to ping"),
+		),
+		mcp.WithString("from",
+			mcp.Required(),
+			mcp.Description("Probe locations (max 5). Use semicolons for multiple: 'Paris; Tokyo'. Structured: 'city:Tokyo,asn:2497'"),
+		),
+		mcp.WithString("protocol",
+			mcp.Description("Protocol: icmp (default) or tcp"),
+			mcp.Enum("icmp", "tcp"),
+		),
+		mcp.WithNumber("port",
+			mcp.Description("Destination port for TCP ping (default: 80)"),
+		),
+		mcp.WithNumber("packets",
+			mcp.Description("Number of packets to send (1-16, default: 3)"),
+		),
+		mcp.WithBoolean("ipv4",
+			mcp.Description("Force IPv4 only"),
+		),
+		mcp.WithBoolean("ipv6",
+			mcp.Description("Force IPv6 only"),
+		),
+	)
+}
+
+func dnsTool() mcp.Tool {
+	return mcp.NewTool("dns",
+		mcp.WithDescription(`Run a distributed DNS lookup from remote GlobalPing probe locations. Resolves domain names and returns DNS records.
+
+Supports all common record types. Use trace mode to see the full delegation path from root servers.
+
+Does not require root privileges. No API key needed (rate-limited).
+
+Examples:
+- A record: target="example.com", from="Paris"
+- MX records: target="gmail.com", from="Tokyo", query_type="MX"
+- With custom resolver: target="example.com", from="London", resolver="1.1.1.1"
+- Delegation trace: target="example.com", from="Paris", trace=true`),
+		mcp.WithString("target",
+			mcp.Required(),
+			mcp.Description("Domain name to query"),
+		),
+		mcp.WithString("from",
+			mcp.Required(),
+			mcp.Description("Probe locations (max 5). Use semicolons for multiple: 'Paris; Tokyo'"),
+		),
+		mcp.WithString("query_type",
+			mcp.Description("DNS record type (default: A)"),
+			mcp.Enum("A", "AAAA", "MX", "NS", "TXT", "CNAME", "SOA", "PTR", "SRV", "CAA"),
+		),
+		mcp.WithString("resolver",
+			mcp.Description("Custom DNS resolver IP or FQDN (default: probe's system resolver)"),
+		),
+		mcp.WithString("protocol",
+			mcp.Description("Protocol: udp (default) or tcp"),
+			mcp.Enum("udp", "tcp"),
+		),
+		mcp.WithNumber("port",
+			mcp.Description("DNS server port (default: 53)"),
+		),
+		mcp.WithBoolean("trace",
+			mcp.Description("Enable delegation path tracing from root servers"),
+		),
+		mcp.WithBoolean("ipv4",
+			mcp.Description("Force IPv4 only"),
+		),
+		mcp.WithBoolean("ipv6",
+			mcp.Description("Force IPv6 only"),
 		),
 	)
 }

@@ -18,6 +18,8 @@ func SetupCmd(version string) *cobra.Command {
 	cmd.AddCommand(NewInfoCmd())
 	cmd.AddCommand(NewMCPCmd())
 	cmd.AddCommand(NewProbesCmd())
+	cmd.AddCommand(NewPingCmd())
+	cmd.AddCommand(NewDNSCmd())
 	return cmd
 }
 

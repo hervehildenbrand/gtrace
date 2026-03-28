@@ -328,6 +328,93 @@ type probeInfo struct {
 	Network string
 }
 
+// formatPingResults formats ping results from multiple probes.
+func formatPingResults(results []globalping.PingProbeResult, target string) string {
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "Ping results for %s\n", target)
+	sb.WriteString(strings.Repeat("-", 60))
+	sb.WriteByte('\n')
+
+	for i, pr := range results {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+
+		fmt.Fprintf(&sb, "=== Probe: %s, %s (AS%d %s) ===\n",
+			pr.Probe.City, pr.Probe.Country, pr.Probe.ASN, pr.Probe.Network)
+
+		r := pr.Result
+		if r.ResolvedHostname != "" && r.ResolvedHostname != r.ResolvedAddress {
+			fmt.Fprintf(&sb, "Target: %s (%s)\n", r.ResolvedAddress, r.ResolvedHostname)
+		} else if r.ResolvedAddress != "" {
+			fmt.Fprintf(&sb, "Target: %s\n", r.ResolvedAddress)
+		}
+
+		fmt.Fprintf(&sb, "Packets: %d sent, %d received, %.1f%% loss\n",
+			r.Stats.Total, r.Stats.Rcv, r.Stats.Loss)
+
+		if r.Stats.Min != nil && r.Stats.Avg != nil && r.Stats.Max != nil {
+			fmt.Fprintf(&sb, "RTT: min=%.2f avg=%.2f max=%.2f ms\n",
+				*r.Stats.Min, *r.Stats.Avg, *r.Stats.Max)
+		}
+
+		if len(r.Timings) > 0 {
+			var parts []string
+			for _, t := range r.Timings {
+				parts = append(parts, fmt.Sprintf("%.2fms", t.RTT))
+			}
+			fmt.Fprintf(&sb, "Timings: %s\n", strings.Join(parts, " "))
+		}
+	}
+
+	return sb.String()
+}
+
+// formatDNSResults formats DNS results from multiple probes.
+func formatDNSResults(results []globalping.DNSProbeResult, target string, trace bool) string {
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "DNS lookup for %s\n", target)
+	sb.WriteString(strings.Repeat("-", 60))
+	sb.WriteByte('\n')
+
+	for i, pr := range results {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+
+		fmt.Fprintf(&sb, "=== Probe: %s, %s (AS%d %s) ===\n",
+			pr.Probe.City, pr.Probe.Country, pr.Probe.ASN, pr.Probe.Network)
+
+		r := pr.Result
+
+		if trace && r.RawOutput != "" {
+			sb.WriteString(r.RawOutput)
+			sb.WriteByte('\n')
+			continue
+		}
+
+		if r.Resolver != "" {
+			fmt.Fprintf(&sb, "Resolver: %s\n", r.Resolver)
+		}
+		fmt.Fprintf(&sb, "Status: %s (%d)\n", r.StatusCodeName, r.StatusCode)
+		if r.Timings.Total > 0 {
+			fmt.Fprintf(&sb, "Query time: %.1f ms\n", r.Timings.Total)
+		}
+
+		if len(r.Answers) > 0 {
+			sb.WriteString("\nANSWER SECTION:\n")
+			for _, a := range r.Answers {
+				fmt.Fprintf(&sb, "  %-30s %5d  %s  %-5s %s\n",
+					a.Name, a.TTL, a.Class, a.Type, a.Value)
+			}
+		}
+	}
+
+	return sb.String()
+}
+
 // formatASNResult formats an ASN lookup result.
 func formatASNResult(result *enrich.ASNResult) string {
 	var sb strings.Builder

@@ -344,6 +344,114 @@ func (h *handlers) handleGlobalPing(ctx context.Context, req mcp.CallToolRequest
 	return mcp.NewToolResultText(formatGlobalPingResults(probeResults)), nil
 }
 
+func (h *handlers) handlePing(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	target, err := req.RequireString("target")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	from, err := req.RequireString("from")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	locations := globalping.ParseLocationStrings(from)
+	if len(locations) == 0 {
+		return mcp.NewToolResultError("no valid locations provided"), nil
+	}
+
+	opts := globalping.MeasurementOptions{}
+	if v := req.GetString("protocol", ""); v != "" {
+		opts.Protocol = strings.ToUpper(v)
+	}
+	if v := req.GetInt("port", 0); v > 0 {
+		opts.Port = v
+	}
+	if v := req.GetInt("packets", 0); v > 0 {
+		opts.Packets = v
+	}
+	if req.GetBool("ipv4", false) {
+		opts.IPVersion = 4
+	} else if req.GetBool("ipv6", false) {
+		opts.IPVersion = 6
+	}
+
+	measReq := &globalping.MeasurementRequest{
+		Type:      globalping.MeasurementTypePing,
+		Target:    target,
+		Locations: locations,
+		Options:   opts,
+	}
+
+	if err := measReq.Validate(); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid request: %v", err)), nil
+	}
+
+	client := globalping.NewClient(h.apiKey)
+	result, err := client.RunPingMeasurement(ctx, measReq)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("ping measurement failed: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(formatPingResults(result.Results, target)), nil
+}
+
+func (h *handlers) handleDNS(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	target, err := req.RequireString("target")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	from, err := req.RequireString("from")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	locations := globalping.ParseLocationStrings(from)
+	if len(locations) == 0 {
+		return mcp.NewToolResultError("no valid locations provided"), nil
+	}
+
+	opts := globalping.MeasurementOptions{}
+	if v := req.GetString("query_type", ""); v != "" {
+		opts.Query = &globalping.DNSQuery{Type: strings.ToUpper(v)}
+	}
+	if v := req.GetString("resolver", ""); v != "" {
+		opts.Resolver = v
+	}
+	if v := req.GetString("protocol", ""); v != "" {
+		opts.Protocol = strings.ToUpper(v)
+	}
+	if v := req.GetInt("port", 0); v > 0 {
+		opts.Port = v
+	}
+	opts.Trace = req.GetBool("trace", false)
+	if req.GetBool("ipv4", false) {
+		opts.IPVersion = 4
+	} else if req.GetBool("ipv6", false) {
+		opts.IPVersion = 6
+	}
+
+	measReq := &globalping.MeasurementRequest{
+		Type:      globalping.MeasurementTypeDNS,
+		Target:    target,
+		Locations: locations,
+		Options:   opts,
+	}
+
+	if err := measReq.Validate(); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid request: %v", err)), nil
+	}
+
+	client := globalping.NewClient(h.apiKey)
+	result, err := client.RunDNSMeasurement(ctx, measReq)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("DNS measurement failed: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(formatDNSResults(result.Results, target, opts.Trace)), nil
+}
+
 func (h *handlers) handleASNLookup(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ipStr, err := req.RequireString("ip")
 	if err != nil {

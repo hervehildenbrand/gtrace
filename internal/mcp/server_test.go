@@ -23,6 +23,8 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 		"traceroute":  false,
 		"mtr":         false,
 		"globalping":  false,
+		"ping":        false,
+		"dns":         false,
 		"asn_lookup":  false,
 		"geo_lookup":  false,
 		"reverse_dns": false,
@@ -40,8 +42,8 @@ func TestNewServer_RegistersAllTools(t *testing.T) {
 		}
 	}
 
-	if len(tools) != 7 {
-		t.Errorf("expected 7 tools, got %d", len(tools))
+	if len(tools) != 9 {
+		t.Errorf("expected 9 tools, got %d", len(tools))
 	}
 }
 
