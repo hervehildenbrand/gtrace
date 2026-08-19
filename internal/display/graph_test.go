@@ -348,3 +348,43 @@ func TestGraphRenderer_TimeoutHop_Star(t *testing.T) {
 		t.Errorf("expected timeout star row:\n%s", out)
 	}
 }
+
+func TestGraphRenderer_NoColor_NoANSI(t *testing.T) {
+	a := testTrace("Paris", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"8.8.8.8"})
+	b := testTrace("Tokyo", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"8.8.8.8"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{a, b}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(buf.String(), "\x1b[") {
+		t.Error("noColor output must contain no ANSI escape sequences")
+	}
+}
+
+func TestGraphRenderer_NarrowWidth_TruncatesRows(t *testing.T) {
+	tr := testTrace("", "t", "8.8.8.8", true, []string{"10.0.0.1"}, []string{"8.8.8.8"})
+	// long enrichment forces truncation
+	tr.Hops[0].Enrichment = hop.Enrichment{
+		ASN: 64500, ASOrg: "An Extremely Long Organization Name For Testing",
+		City: "Somewhereville", Country: "FR", Hostname: "very-long-hostname.example.org",
+	}
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+	r.termWidth = 40
+
+	if err := r.Render([]*hop.TraceResult{tr}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if w := runeDisplayWidth(line); w > 40 {
+			t.Errorf("line exceeds width 40 (%d): %q", w, line)
+		}
+	}
+	if !strings.Contains(buf.String(), "...") {
+		t.Error("expected truncated node text to end with ...")
+	}
+}

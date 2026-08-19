@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	"golang.org/x/term"
 )
@@ -526,6 +527,27 @@ func nodeText(n *graphNode, g *pathGraph, nSources int) string {
 	return strings.Join(parts, "  ")
 }
 
+// paint applies the source's lane color unless colors are off or the
+// element is shared/neutral (src < 0).
+func (r *GraphRenderer) paint(s string, src int) string {
+	if r.noColor || src < 0 {
+		return s
+	}
+	return lipgloss.NewStyle().Foreground(sourceColors[src%len(sourceColors)]).Render(s)
+}
+
+// truncateText cuts text to max display columns, ending with "...".
+func truncateText(text string, max int) string {
+	if max < 10 {
+		max = 10
+	}
+	if runeDisplayWidth(text) <= max {
+		return text
+	}
+	runes := []rune(text)
+	return string(runes[:max-3]) + "..."
+}
+
 // Render draws a DAG for one or more trace results.
 func (r *GraphRenderer) Render(results []*hop.TraceResult) error {
 	if len(results) == 0 {
@@ -551,11 +573,15 @@ func (r *GraphRenderer) Render(results []*hop.TraceResult) error {
 	for _, row := range rows {
 		var b strings.Builder
 		for _, c := range row.cells {
-			b.WriteString(c.glyph)
+			b.WriteString(r.paint(c.glyph, c.src))
 		}
-		line := b.String()
+		line := strings.TrimRight(b.String(), " ")
 		if row.text != "" {
-			line += " " + row.text
+			text := truncateText(row.text, r.termWidth-2*len(row.cells)-1)
+			if row.node != nil && row.node.isSource {
+				text = r.paint(text, singleSource(row.node.sources))
+			}
+			line = b.String() + " " + text
 		}
 		fmt.Fprintln(r.writer, strings.TrimRight(line, " "))
 	}

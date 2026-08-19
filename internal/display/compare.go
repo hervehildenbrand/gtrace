@@ -17,13 +17,14 @@ const (
 	colWidthMax = 45
 )
 
-// Source colors for up to 5 sources.
+// Source colors for up to 6 sources (5 GlobalPing locations + local).
 var sourceColors = []lipgloss.Color{
 	lipgloss.Color("39"),  // Cyan
 	lipgloss.Color("208"), // Orange
 	lipgloss.Color("141"), // Purple
 	lipgloss.Color("82"),  // Green
 	lipgloss.Color("205"), // Pink
+	lipgloss.Color("220"), // Gold
 }
 
 // CompareRenderer renders trace results from multiple sources.
