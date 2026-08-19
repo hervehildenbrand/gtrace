@@ -2,10 +2,12 @@ package enrich
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -412,5 +414,25 @@ func TestASNLookup_Lookup_IPv6(t *testing.T) {
 	// Google's ASN should be returned
 	if result.ASN == 0 {
 		t.Error("expected non-zero ASN for Google IPv6 DNS")
+	}
+}
+
+func TestASNResult_MarshalJSON_LowercaseCamelKeys(t *testing.T) {
+	data, err := json.Marshal(&ASNResult{
+		ASN:      15169,
+		Prefix:   "8.8.8.0/24",
+		Country:  "US",
+		Registry: "arin",
+		Date:     "2014-03-14",
+		Name:     "GOOGLE",
+	})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	for _, key := range []string{`"asn":15169`, `"prefix":"8.8.8.0/24"`, `"country":"US"`, `"registry":"arin"`, `"date":"2014-03-14"`, `"name":"GOOGLE"`} {
+		if !strings.Contains(string(data), key) {
+			t.Errorf("JSON missing %s:\n%s", key, data)
+		}
 	}
 }

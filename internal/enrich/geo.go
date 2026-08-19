@@ -15,13 +15,13 @@ import (
 
 // GeoResult contains the result of a GeoIP lookup.
 type GeoResult struct {
-	City       string  // City name
-	Country    string  // Country code (ISO 3166-1 alpha-2)
-	CountryName string // Full country name
-	Region     string  // Region/state
-	Latitude   float64 // Latitude
-	Longitude  float64 // Longitude
-	Timezone   string  // Timezone
+	City        string  `json:"city,omitempty"`        // City name
+	Country     string  `json:"country,omitempty"`     // Country code (ISO 3166-1 alpha-2)
+	CountryName string  `json:"countryName,omitempty"` // Full country name
+	Region      string  `json:"region,omitempty"`      // Region/state
+	Latitude    float64 `json:"latitude"`              // Latitude
+	Longitude   float64 `json:"longitude"`             // Longitude
+	Timezone    string  `json:"timezone,omitempty"`    // Timezone
 }
 
 // String returns a formatted location string.

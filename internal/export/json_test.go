@@ -252,6 +252,31 @@ func TestJSONExport_NoDecodeWhenNil(t *testing.T) {
 	}
 }
 
+func TestConvertTrace_MapsTraceWithoutExporter(t *testing.T) {
+	tr := createTestTrace()
+
+	exported := ConvertTrace(tr)
+
+	if exported.Target != "google.com" {
+		t.Errorf("expected target 'google.com', got %q", exported.Target)
+	}
+	if exported.TargetIP != "8.8.8.8" {
+		t.Errorf("expected target IP '8.8.8.8', got %q", exported.TargetIP)
+	}
+	if !exported.ReachedTarget {
+		t.Error("expected ReachedTarget true")
+	}
+	if len(exported.Hops) != 2 {
+		t.Fatalf("expected 2 hops, got %d", len(exported.Hops))
+	}
+	if exported.Hops[0].IP != "192.168.1.1" {
+		t.Errorf("expected first hop IP '192.168.1.1', got %q", exported.Hops[0].IP)
+	}
+	if exported.Hops[1].ASN != 12345 {
+		t.Errorf("expected second hop ASN 12345, got %d", exported.Hops[1].ASN)
+	}
+}
+
 func createTestTrace() *hop.TraceResult {
 	tr := hop.NewTraceResult("google.com", "8.8.8.8")
 	tr.Protocol = "icmp"

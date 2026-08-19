@@ -94,6 +94,13 @@ func (e *JSONExporter) Export(w io.Writer, tr *hop.TraceResult) error {
 	return encoder.Encode(exported)
 }
 
+// ConvertTrace transforms a TraceResult to its exported JSON representation
+// without going through an io.Writer. Used by callers that need the struct
+// itself (e.g. MCP structured output).
+func ConvertTrace(tr *hop.TraceResult) *ExportedTrace {
+	return (&JSONExporter{}).convert(tr)
+}
+
 // convert transforms a TraceResult to an ExportedTrace.
 func (e *JSONExporter) convert(tr *hop.TraceResult) *ExportedTrace {
 	exported := &ExportedTrace{

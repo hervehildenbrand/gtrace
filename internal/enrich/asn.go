@@ -16,12 +16,12 @@ import (
 
 // ASNResult contains the result of an ASN lookup.
 type ASNResult struct {
-	ASN      uint32 // AS number
-	Prefix   string // IP prefix (CIDR)
-	Country  string // Country code
-	Registry string // RIR (arin, ripe, apnic, etc.)
-	Date     string // Allocation date
-	Name     string // AS organization name
+	ASN      uint32 `json:"asn"`                // AS number
+	Prefix   string `json:"prefix,omitempty"`   // IP prefix (CIDR)
+	Country  string `json:"country,omitempty"`  // Country code
+	Registry string `json:"registry,omitempty"` // RIR (arin, ripe, apnic, etc.)
+	Date     string `json:"date,omitempty"`     // Allocation date
+	Name     string `json:"name,omitempty"`     // AS organization name
 }
 
 // ASNLookup performs ASN lookups via Team Cymru DNS.

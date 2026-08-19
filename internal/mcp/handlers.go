@@ -53,7 +53,7 @@ func (h *handlers) handleListProbes(ctx context.Context, req mcp.CallToolRequest
 		probes = probes[:limit]
 	}
 
-	return mcp.NewToolResultText(formatProbeList(probes)), nil
+	return probeListResult(probes, req.GetString("format", "text")), nil
 }
 
 func (h *handlers) handleTraceroute(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -124,7 +124,7 @@ func (h *handlers) handleTraceroute(ctx context.Context, req mcp.CallToolRequest
 	enricher := enrich.NewEnricher()
 	enricher.EnrichTrace(ctx, result)
 
-	return mcp.NewToolResultText(formatTraceResult(result)), nil
+	return tracerouteResult(result, req.GetString("format", "text"), req.GetString("view", "table")), nil
 }
 
 func (h *handlers) handleMTR(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -270,7 +270,7 @@ func (h *handlers) handleMTR(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		}
 	}
 
-	return mcp.NewToolResultText(formatMTRStats(stats, completedCycles, target)), nil
+	return mtrResult(stats, completedCycles, target, req.GetString("format", "text")), nil
 }
 
 func (h *handlers) handleGlobalPing(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -341,7 +341,7 @@ func (h *handlers) handleGlobalPing(ctx context.Context, req mcp.CallToolRequest
 		})
 	}
 
-	return mcp.NewToolResultText(formatGlobalPingResults(probeResults)), nil
+	return globalPingResult(probeResults, req.GetString("format", "text"), req.GetString("view", "table")), nil
 }
 
 func (h *handlers) handlePing(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -396,7 +396,7 @@ func (h *handlers) handlePing(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(fmt.Sprintf("ping measurement failed: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(formatPingResults(result.Results, target)), nil
+	return pingResult(result.Results, target, req.GetString("format", "text")), nil
 }
 
 func (h *handlers) handleDNS(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -456,7 +456,7 @@ func (h *handlers) handleDNS(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		return mcp.NewToolResultError(fmt.Sprintf("DNS measurement failed: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(formatDNSResults(result.Results, target, opts.Trace)), nil
+	return dnsResult(result.Results, target, opts.Trace, req.GetString("format", "text")), nil
 }
 
 func (h *handlers) handleASNLookup(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -476,7 +476,7 @@ func (h *handlers) handleASNLookup(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(fmt.Sprintf("ASN lookup failed: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(formatASNResult(result)), nil
+	return asnResult(result, req.GetString("format", "text")), nil
 }
 
 func (h *handlers) handleGeoLookup(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -496,7 +496,7 @@ func (h *handlers) handleGeoLookup(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(fmt.Sprintf("geo lookup failed: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(formatGeoResult(result)), nil
+	return geoResult(result, req.GetString("format", "text")), nil
 }
 
 func (h *handlers) handleReverseDNS(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -516,7 +516,7 @@ func (h *handlers) handleReverseDNS(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(fmt.Sprintf("reverse DNS lookup failed: %v", err)), nil
 	}
 
-	return mcp.NewToolResultText(formatRDNSResult(ipStr, hostname)), nil
+	return rdnsResult(ipStr, hostname, req.GetString("format", "text")), nil
 }
 
 // getAddressFamily determines the address family from ipv4/ipv6 flags.
