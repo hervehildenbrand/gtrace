@@ -185,9 +185,9 @@ func TestOrderNodes_TopologicalDepthOrder(t *testing.T) {
 			t.Errorf("edge %s -> %s violates topological order", e[0], e[1])
 		}
 	}
-	// sources (depth 0) come first, in index order
-	if order[0] != "src:0" || order[1] != "src:1" {
-		t.Errorf("expected source nodes first, got %v", order[:2])
+	// the first source opens the graph; later sources start their own strands
+	if order[0] != "src:0" {
+		t.Errorf("expected src:0 first, got %v", order[0])
 	}
 }
 
@@ -419,5 +419,123 @@ func TestGraphRenderer_CollapsedTimeouts_ShowCount(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "(no response ×3)") {
 		t.Errorf("expected collapsed timeout count in output:\n%s", buf.String())
+	}
+}
+
+func TestOrderNodes_PathFollowing_ContiguousStrands(t *testing.T) {
+	a := testTrace("A", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"10.1.0.2"}, []string{"8.8.8.8"})
+	b := testTrace("B", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"10.2.0.2"}, []string{"8.8.8.8"})
+	g := buildGraph([]*hop.TraceResult{a, b})
+
+	order := orderNodes(g)
+
+	want := []string{"src:0", "10.1.0.1", "10.1.0.2", "src:1", "10.2.0.1", "10.2.0.2", "8.8.8.8"}
+	if len(order) != len(want) {
+		t.Fatalf("expected %d nodes, got %d: %v", len(want), len(order), order)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("expected contiguous strands %v, got %v", want, order)
+		}
+	}
+}
+
+func TestGraphRenderer_TwoSources_StrandsReadTopToBottom(t *testing.T) {
+	a := testTrace("A", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"10.1.0.2"}, []string{"8.8.8.8"})
+	b := testTrace("B", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"10.2.0.2"}, []string{"8.8.8.8"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{a, b}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	// Source A's full path renders as adjacent rows, then B's, then the merge.
+	for _, chunk := range []string{
+		"○  A\n●  10.1.0.1  10.0ms\n●  10.1.0.2  10.0ms\n│ ○  B\n│ ●  10.2.0.1  10.0ms\n│ ●  10.2.0.2  10.0ms\n├─╯\n◎  8.8.8.8",
+	} {
+		if !strings.Contains(out, chunk) {
+			t.Errorf("output missing contiguous strand block:\n--- want ---\n%s\n--- got ---\n%s", chunk, out)
+		}
+	}
+}
+
+// flowHop builds a hop whose probes carry ECMP FlowIDs: pairs of (ip, flowID).
+func flowHop(ttl int, pairs ...struct {
+	ip   string
+	flow int
+}) *hop.Hop {
+	h := hop.NewHop(ttl)
+	for _, p := range pairs {
+		h.Probes = append(h.Probes, hop.Probe{
+			IP: net.ParseIP(p.ip), RTT: 10 * time.Millisecond, FlowID: p.flow,
+		})
+	}
+	return h
+}
+
+type flowProbe = struct {
+	ip   string
+	flow int
+}
+
+func TestBuildGraph_FlowIDs_PerFlowEdges(t *testing.T) {
+	tr := hop.NewTraceResult("t", "9.9.9.9")
+	tr.AddHop(flowHop(1, flowProbe{"10.0.1.1", 1}, flowProbe{"10.0.1.2", 2}))
+	tr.AddHop(flowHop(2, flowProbe{"10.0.2.1", 1}, flowProbe{"10.0.2.2", 2}))
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	if g.edges[[2]string{"10.0.1.1", "10.0.2.1"}] == nil || g.edges[[2]string{"10.0.1.2", "10.0.2.2"}] == nil {
+		t.Error("expected per-flow edges connecting same FlowID across hops")
+	}
+	if g.edges[[2]string{"10.0.1.1", "10.0.2.2"}] != nil || g.edges[[2]string{"10.0.1.2", "10.0.2.1"}] != nil {
+		t.Error("expected NO cross-flow mesh edges when FlowIDs are tracked")
+	}
+}
+
+func TestBuildGraph_FlowIDs_UnmatchedNodeFallsBackToMesh(t *testing.T) {
+	tr := hop.NewTraceResult("t", "9.9.9.9")
+	tr.AddHop(flowHop(1, flowProbe{"10.0.1.1", 1}, flowProbe{"10.0.1.2", 2}))
+	// hop 2: flow 1 continues; flow 3 appears with no match in hop 1
+	tr.AddHop(flowHop(2, flowProbe{"10.0.2.1", 1}, flowProbe{"10.0.2.9", 3}))
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	// unmatched new node must still be connected (mesh fallback from all prev)
+	if g.edges[[2]string{"10.0.1.1", "10.0.2.9"}] == nil || g.edges[[2]string{"10.0.1.2", "10.0.2.9"}] == nil {
+		t.Error("expected unmatched node to fall back to mesh in-edges")
+	}
+	// unmatched prev node (flow 2 vanished) must keep an out-edge
+	if g.edges[[2]string{"10.0.1.2", "10.0.2.1"}] == nil {
+		t.Error("expected prev node with vanished flow to fall back to mesh out-edges")
+	}
+}
+
+func TestGraphRenderer_FlowStrands_RenderContiguously(t *testing.T) {
+	tr := hop.NewTraceResult("t", "9.9.9.9")
+	tr.TargetIP = "9.9.9.9"
+	tr.AddHop(flowHop(1, flowProbe{"10.0.0.1", 1}, flowProbe{"10.0.0.1", 2}))
+	tr.AddHop(flowHop(2, flowProbe{"10.0.1.1", 1}, flowProbe{"10.0.1.2", 2}))
+	tr.AddHop(flowHop(3, flowProbe{"10.0.2.1", 1}, flowProbe{"10.0.2.2", 2}))
+	tr.AddHop(flowHop(4, flowProbe{"9.9.9.9", 1}, flowProbe{"9.9.9.9", 2}))
+	tr.ReachedTarget = true
+
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+	if err := r.Render([]*hop.TraceResult{tr}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	// flow 1's two hops adjacent, then flow 2's two hops, then the merge
+	want := "● │  10.0.1.1  10.0ms\n● │  10.0.2.1  10.0ms\n│ ●  10.0.1.2  10.0ms\n│ ●  10.0.2.2  10.0ms\n├─╯\n◎  9.9.9.9"
+	if !strings.Contains(out, want) {
+		t.Errorf("expected parallel flow strands:\n--- want ---\n%s\n--- got ---\n%s", want, out)
 	}
 }

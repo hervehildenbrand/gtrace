@@ -86,6 +86,72 @@ func ipAvgRTT(h *hop.Hop, ip string) time.Duration {
 	return total / time.Duration(count)
 }
 
+// flowIPs maps FlowID -> responding IP for hops probed with --ecmp-flows.
+func flowIPs(h *hop.Hop) map[int]string {
+	m := map[int]string{}
+	for _, p := range h.Probes {
+		if !p.Timeout && p.IP != nil && p.FlowID > 0 {
+			if _, ok := m[p.FlowID]; !ok {
+				m[p.FlowID] = p.IP.String()
+			}
+		}
+	}
+	return m
+}
+
+// connectHops wires the previous hop's nodes to the current hop's nodes.
+// When both hops carry FlowIDs (--ecmp-flows), same-flow nodes connect
+// pairwise so each real path renders as its own strand; anything the flow
+// pass leaves unwired falls back to the full mesh so no node dangles.
+func (g *pathGraph) connectHops(prevHop, curHop *hop.Hop, prev, cur []string, source int) {
+	if prevHop != nil && curHop != nil {
+		pf, cf := flowIPs(prevHop), flowIPs(curHop)
+		if len(pf) > 0 && len(cf) > 0 {
+			keyByLabel := func(keys []string, label string) string {
+				for _, k := range keys {
+					if g.nodes[k].label == label {
+						return k
+					}
+				}
+				return ""
+			}
+			linkedIn, linkedOut := map[string]bool{}, map[string]bool{}
+			for f, pip := range pf {
+				cip, ok := cf[f]
+				if !ok {
+					continue
+				}
+				pk, ck := keyByLabel(prev, pip), keyByLabel(cur, cip)
+				if pk == "" || ck == "" {
+					continue
+				}
+				g.addEdge(pk, ck, source)
+				linkedOut[pk], linkedIn[ck] = true, true
+			}
+			for _, c := range cur {
+				if !linkedIn[c] {
+					for _, p := range prev {
+						g.addEdge(p, c, source)
+					}
+				}
+			}
+			for _, p := range prev {
+				if !linkedOut[p] {
+					for _, c := range cur {
+						g.addEdge(p, c, source)
+					}
+				}
+			}
+			return
+		}
+	}
+	for _, p := range prev {
+		for _, c := range cur {
+			g.addEdge(p, c, source)
+		}
+	}
+}
+
 // distinctIPs returns the distinct responding IPs of a hop in probe order.
 func distinctIPs(h *hop.Hop) []string {
 	var ips []string
@@ -103,10 +169,8 @@ func distinctIPs(h *hop.Hop) []string {
 	return ips
 }
 
-// buildGraph merges trace results into a path DAG. Within a source,
-// consecutive hop node sets are fully connected.
-// ponytail: mesh edges overstate what ICMP tells us; FlowID-based per-flow
-// path reconstruction is the upgrade path if exact ECMP wiring matters.
+// buildGraph merges trace results into a path DAG. Consecutive hops connect
+// per-flow when FlowIDs were tracked (--ecmp-flows), else as a full mesh.
 func buildGraph(results []*hop.TraceResult) *pathGraph {
 	g := &pathGraph{
 		nodes:        map[string]*graphNode{},
@@ -132,10 +196,13 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 
 		visits := map[string]int{} // per-source IP revisit counter (loop guard)
 		prev := []string{srcKey}
+		var prevH *hop.Hop // nil for source and timeout nodes (no flow data)
 		for hi := 0; hi < len(hops); hi++ {
 			h := hops[hi]
+			curH := h
 			var cur []string
 			if allTimeout(h) {
+				curH = nil
 				// collapse a run of consecutive silent hops into one node
 				run := 1
 				for hi+run < len(hops) && allTimeout(hops[hi+run]) {
@@ -174,12 +241,8 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 					visits[ip]++
 				}
 			}
-			for _, p := range prev {
-				for _, c := range cur {
-					g.addEdge(p, c, i)
-				}
-			}
-			prev = cur
+			g.connectHops(prevH, curH, prev, cur, i)
+			prev, prevH = cur, curH
 		}
 
 		if tr.ReachedTarget {
@@ -192,11 +255,14 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 	return g
 }
 
-// orderNodes returns the node keys in render order: Kahn's topological sort
-// with the ready set kept sorted by (depth, key) for determinism. Two sources
-// can traverse a pair of routers in opposite orders, creating a cross-source
-// cycle that stalls Kahn — the stall-breaker then force-emits the shallowest
-// remaining node, dropping its unsatisfied in-edges.
+// orderNodes returns the node keys in render order: a topological sort that
+// follows one path at a time so each source's strand stays contiguous. The
+// next node is picked by tier — (0) a ready successor of the last emitted
+// node, (1) a ready node sharing a source with it, (2) any ready node — each
+// tie-broken by (depth, key). Two sources can traverse a pair of routers in
+// opposite orders, creating a cross-source cycle that starves the ready set —
+// the stall-breaker then force-emits the shallowest remaining node, dropping
+// its unsatisfied in-edges.
 func orderNodes(g *pathGraph) []string {
 	indeg := make(map[string]int, len(g.nodes))
 	out := map[string][]string{}
@@ -216,15 +282,16 @@ func orderNodes(g *pathGraph) []string {
 		return a < b
 	}
 
-	var ready []string
+	ready := map[string]bool{}
 	for k, d := range indeg {
 		if d == 0 {
-			ready = append(ready, k)
+			ready[k] = true
 		}
 	}
 
 	order := make([]string, 0, len(g.nodes))
 	emitted := make(map[string]bool, len(g.nodes))
+	last := ""
 	for len(order) < len(g.nodes) {
 		if len(ready) == 0 {
 			// stall-breaker: pick the shallowest unemitted node
@@ -234,20 +301,52 @@ func orderNodes(g *pathGraph) []string {
 					pick = k
 				}
 			}
-			ready = append(ready, pick)
+			ready[pick] = true
 		}
-		sort.Slice(ready, func(i, j int) bool { return before(ready[i], ready[j]) })
-		k := ready[0]
-		ready = ready[1:]
-		if emitted[k] {
-			continue
+
+		succ := map[string]bool{}
+		var lastSources map[int]bool
+		if last != "" {
+			for _, s := range out[last] {
+				succ[s] = true
+			}
+			lastSources = g.nodes[last].sources
 		}
-		emitted[k] = true
-		order = append(order, k)
-		for _, next := range out[k] {
+		sharesSource := func(k string) bool {
+			for s := range g.nodes[k].sources {
+				if lastSources[s] {
+					return true
+				}
+			}
+			return false
+		}
+		tierOf := func(k string) int {
+			switch {
+			case succ[k]:
+				return 0
+			case sharesSource(k):
+				return 1
+			default:
+				return 2
+			}
+		}
+
+		pick, pickTier := "", 3
+		for k := range ready {
+			t := tierOf(k)
+			if pick == "" || t < pickTier || (t == pickTier && before(k, pick)) {
+				pick, pickTier = k, t
+			}
+		}
+
+		delete(ready, pick)
+		emitted[pick] = true
+		order = append(order, pick)
+		last = pick
+		for _, next := range out[pick] {
 			indeg[next]--
 			if indeg[next] == 0 && !emitted[next] {
-				ready = append(ready, next)
+				ready[next] = true
 			}
 		}
 	}
@@ -574,6 +673,8 @@ func (r *GraphRenderer) Render(results []*hop.TraceResult) error {
 	} else {
 		fmt.Fprintf(r.writer, "Path graph to %s, %d %s\n\n", target, len(results), srcWord)
 	}
+
+	r.renderASOverview(results)
 
 	for _, row := range rows {
 		var b strings.Builder
