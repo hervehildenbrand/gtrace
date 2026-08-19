@@ -185,9 +185,9 @@ func TestOrderNodes_TopologicalDepthOrder(t *testing.T) {
 			t.Errorf("edge %s -> %s violates topological order", e[0], e[1])
 		}
 	}
-	// sources (depth 0) come first, in index order
-	if order[0] != "src:0" || order[1] != "src:1" {
-		t.Errorf("expected source nodes first, got %v", order[:2])
+	// the first source opens the graph; later sources start their own strands
+	if order[0] != "src:0" {
+		t.Errorf("expected src:0 first, got %v", order[0])
 	}
 }
 
@@ -419,5 +419,48 @@ func TestGraphRenderer_CollapsedTimeouts_ShowCount(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "(no response ×3)") {
 		t.Errorf("expected collapsed timeout count in output:\n%s", buf.String())
+	}
+}
+
+func TestOrderNodes_PathFollowing_ContiguousStrands(t *testing.T) {
+	a := testTrace("A", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"10.1.0.2"}, []string{"8.8.8.8"})
+	b := testTrace("B", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"10.2.0.2"}, []string{"8.8.8.8"})
+	g := buildGraph([]*hop.TraceResult{a, b})
+
+	order := orderNodes(g)
+
+	want := []string{"src:0", "10.1.0.1", "10.1.0.2", "src:1", "10.2.0.1", "10.2.0.2", "8.8.8.8"}
+	if len(order) != len(want) {
+		t.Fatalf("expected %d nodes, got %d: %v", len(want), len(order), order)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("expected contiguous strands %v, got %v", want, order)
+		}
+	}
+}
+
+func TestGraphRenderer_TwoSources_StrandsReadTopToBottom(t *testing.T) {
+	a := testTrace("A", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"10.1.0.2"}, []string{"8.8.8.8"})
+	b := testTrace("B", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"10.2.0.2"}, []string{"8.8.8.8"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{a, b}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	// Source A's full path renders as adjacent rows, then B's, then the merge.
+	for _, chunk := range []string{
+		"○  A\n●  10.1.0.1  10.0ms\n●  10.1.0.2  10.0ms\n│ ○  B\n│ ●  10.2.0.1  10.0ms\n│ ●  10.2.0.2  10.0ms\n├─╯\n◎  8.8.8.8",
+	} {
+		if !strings.Contains(out, chunk) {
+			t.Errorf("output missing contiguous strand block:\n--- want ---\n%s\n--- got ---\n%s", chunk, out)
+		}
 	}
 }

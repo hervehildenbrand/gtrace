@@ -192,11 +192,14 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 	return g
 }
 
-// orderNodes returns the node keys in render order: Kahn's topological sort
-// with the ready set kept sorted by (depth, key) for determinism. Two sources
-// can traverse a pair of routers in opposite orders, creating a cross-source
-// cycle that stalls Kahn — the stall-breaker then force-emits the shallowest
-// remaining node, dropping its unsatisfied in-edges.
+// orderNodes returns the node keys in render order: a topological sort that
+// follows one path at a time so each source's strand stays contiguous. The
+// next node is picked by tier — (0) a ready successor of the last emitted
+// node, (1) a ready node sharing a source with it, (2) any ready node — each
+// tie-broken by (depth, key). Two sources can traverse a pair of routers in
+// opposite orders, creating a cross-source cycle that starves the ready set —
+// the stall-breaker then force-emits the shallowest remaining node, dropping
+// its unsatisfied in-edges.
 func orderNodes(g *pathGraph) []string {
 	indeg := make(map[string]int, len(g.nodes))
 	out := map[string][]string{}
@@ -216,15 +219,16 @@ func orderNodes(g *pathGraph) []string {
 		return a < b
 	}
 
-	var ready []string
+	ready := map[string]bool{}
 	for k, d := range indeg {
 		if d == 0 {
-			ready = append(ready, k)
+			ready[k] = true
 		}
 	}
 
 	order := make([]string, 0, len(g.nodes))
 	emitted := make(map[string]bool, len(g.nodes))
+	last := ""
 	for len(order) < len(g.nodes) {
 		if len(ready) == 0 {
 			// stall-breaker: pick the shallowest unemitted node
@@ -234,20 +238,52 @@ func orderNodes(g *pathGraph) []string {
 					pick = k
 				}
 			}
-			ready = append(ready, pick)
+			ready[pick] = true
 		}
-		sort.Slice(ready, func(i, j int) bool { return before(ready[i], ready[j]) })
-		k := ready[0]
-		ready = ready[1:]
-		if emitted[k] {
-			continue
+
+		succ := map[string]bool{}
+		var lastSources map[int]bool
+		if last != "" {
+			for _, s := range out[last] {
+				succ[s] = true
+			}
+			lastSources = g.nodes[last].sources
 		}
-		emitted[k] = true
-		order = append(order, k)
-		for _, next := range out[k] {
+		sharesSource := func(k string) bool {
+			for s := range g.nodes[k].sources {
+				if lastSources[s] {
+					return true
+				}
+			}
+			return false
+		}
+		tierOf := func(k string) int {
+			switch {
+			case succ[k]:
+				return 0
+			case sharesSource(k):
+				return 1
+			default:
+				return 2
+			}
+		}
+
+		pick, pickTier := "", 3
+		for k := range ready {
+			t := tierOf(k)
+			if pick == "" || t < pickTier || (t == pickTier && before(k, pick)) {
+				pick, pickTier = k, t
+			}
+		}
+
+		delete(ready, pick)
+		emitted[pick] = true
+		order = append(order, pick)
+		last = pick
+		for _, next := range out[pick] {
 			indeg[next]--
 			if indeg[next] == 0 && !emitted[next] {
-				ready = append(ready, next)
+				ready[next] = true
 			}
 		}
 	}
