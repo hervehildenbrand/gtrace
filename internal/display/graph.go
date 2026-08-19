@@ -587,11 +587,11 @@ func nodeText(n *graphNode, g *pathGraph, nSources int) string {
 	if e.ASN > 0 {
 		asn := fmt.Sprintf("AS%d", e.ASN)
 		if e.ASOrg != "" {
-			asn += " " + e.ASOrg
+			asn += " " + shortOrg(e.ASOrg)
 		}
 		parts = append(parts, asn)
 	} else if e.ASOrg != "" {
-		parts = append(parts, e.ASOrg)
+		parts = append(parts, shortOrg(e.ASOrg))
 	}
 	if e.City != "" || e.Country != "" {
 		loc := e.City
