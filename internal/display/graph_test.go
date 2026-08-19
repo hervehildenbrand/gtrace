@@ -262,3 +262,89 @@ func TestGraphRenderer_ECMPHop_ForkAndMergeGlyphs(t *testing.T) {
 		t.Errorf("expected sibling rows in their own lanes:\n%s", out)
 	}
 }
+
+func TestGraphRenderer_TwoSources_ConvergenceMarked(t *testing.T) {
+	a := testTrace("Paris", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"8.8.4.1"}, []string{"8.8.8.8"})
+	b := testTrace("Tokyo", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"8.8.4.1"}, []string{"8.8.8.8"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{a, b}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "◉  8.8.4.1") {
+		t.Errorf("expected convergence marker ◉ for shared node:\n%s", out)
+	}
+	if !strings.Contains(out, "⇐ Paris + Tokyo") {
+		t.Errorf("expected convergence annotation with source names:\n%s", out)
+	}
+	if !strings.Contains(out, "├─╯") {
+		t.Errorf("expected merge connector before convergence node:\n%s", out)
+	}
+	if !strings.Contains(out, "target reached (2/2 sources)") {
+		t.Errorf("expected 2/2 summary:\n%s", out)
+	}
+}
+
+func TestGraphRenderer_ConvergeThenDiverge_ReSplitsLanes(t *testing.T) {
+	a := testTrace("A", "t", "9.9.9.9", false,
+		[]string{"10.0.0.9"}, []string{"2.2.2.1"})
+	b := testTrace("B", "t", "9.9.9.9", false,
+		[]string{"10.0.0.9"}, []string{"3.3.3.1"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{a, b}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "◉  10.0.0.9") {
+		t.Errorf("expected convergence at shared first hop:\n%s", out)
+	}
+	if !strings.Contains(out, "├─╮") {
+		t.Errorf("expected fork connector after convergence (divergence):\n%s", out)
+	}
+	if !strings.Contains(out, "● │  2.2.2.1") || !strings.Contains(out, "●  3.3.3.1") {
+		t.Errorf("expected diverged nodes in separate lanes:\n%s", out)
+	}
+}
+
+func TestGraphRenderer_UnreachedTarget_SummaryLine(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", false,
+		[]string{"10.0.0.1"}, []string{"10.0.0.2"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{tr}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	if strings.Contains(out, "◎") {
+		t.Errorf("expected no target marker when unreached:\n%s", out)
+	}
+	if !strings.Contains(out, "target not reached") {
+		t.Errorf("expected 'target not reached' summary:\n%s", out)
+	}
+}
+
+func TestGraphRenderer_TimeoutHop_Star(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", true,
+		[]string{"10.0.0.1"}, nil, []string{"9.9.9.9"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{tr}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "*  (no response)") {
+		t.Errorf("expected timeout star row:\n%s", out)
+	}
+}
