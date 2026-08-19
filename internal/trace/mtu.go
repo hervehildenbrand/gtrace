@@ -1,6 +1,8 @@
 // Package trace implements traceroute functionality using various protocols.
 package trace
 
+import "net"
+
 // MTU constants
 const (
 	// StandardMTU is the typical Ethernet MTU
@@ -84,4 +86,33 @@ func ParseMTUFromICMPv6PacketTooBig(data []byte) (int, bool) {
 		return 0, false
 	}
 	return mtu, true
+}
+
+// GetEgressMTU returns the MTU of the local interface that routes toward
+// target, falling back to StandardMTU when it cannot be determined.
+// Dialing UDP performs no I/O; it only resolves the local source address.
+func GetEgressMTU(target net.IP) int {
+	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: target, Port: 33434})
+	if err != nil {
+		return StandardMTU
+	}
+	localIP := conn.LocalAddr().(*net.UDPAddr).IP
+	_ = conn.Close()
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return StandardMTU
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.Equal(localIP) && iface.MTU >= MinMTU {
+				return iface.MTU
+			}
+		}
+	}
+	return StandardMTU
 }

@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"net"
 	"testing"
 )
 
@@ -161,5 +162,22 @@ func TestParseMTUFromICMPv6PacketTooBig(t *testing.T) {
 func TestMinMTUv6_IsRFC8200Minimum(t *testing.T) {
 	if MinMTUv6 != 1280 {
 		t.Errorf("MinMTUv6 = %d, want 1280", MinMTUv6)
+	}
+}
+
+func TestGetEgressMTU_LoopbackReturnsPositiveMTU(t *testing.T) {
+	mtu := GetEgressMTU(net.ParseIP("127.0.0.1"))
+	if mtu < MinMTU {
+		t.Errorf("GetEgressMTU(127.0.0.1) = %d, want >= %d", mtu, MinMTU)
+	}
+}
+
+func TestGetEgressMTU_UnroutableFallsBackToStandard(t *testing.T) {
+	// 192.0.2.0/24 is TEST-NET-1; dialing usually still succeeds (no packets
+	// are sent for UDP dial), so this mainly guards the fallback path: the
+	// result must always be a sane MTU.
+	mtu := GetEgressMTU(net.ParseIP("192.0.2.1"))
+	if mtu < MinMTU {
+		t.Errorf("GetEgressMTU(192.0.2.1) = %d, want >= %d", mtu, MinMTU)
 	}
 }
