@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hervehildenbrand/gtrace/internal/display"
+	"github.com/hervehildenbrand/gtrace/internal/enrich"
 	"github.com/hervehildenbrand/gtrace/internal/export"
+	"github.com/hervehildenbrand/gtrace/internal/globalping"
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
@@ -163,5 +166,223 @@ func TestGlobalPingResult_GraphView_ContainsLaneGlyphs(t *testing.T) {
 	}
 	if strings.Contains(text, "\x1b[") {
 		t.Error("graph view must not contain ANSI escapes")
+	}
+}
+
+func resultTestMTRStats() map[int]*display.HopStats {
+	stats := make(map[int]*display.HopStats)
+	s1 := display.NewHopStats(1)
+	for i := 0; i < 4; i++ {
+		s1.AddProbe(net.ParseIP("192.168.1.1"), time.Duration(i+1)*time.Millisecond)
+	}
+	s1.SetEnrichment(hop.Enrichment{Hostname: "gw.local", ASN: 64496})
+	stats[1] = s1
+
+	s2 := display.NewHopStats(2)
+	s2.AddProbe(net.ParseIP("8.8.8.8"), 10*time.Millisecond)
+	s2.AddTimeout()
+	stats[2] = s2
+
+	// Trailing all-timeout hop must be trimmed like the text formatter does.
+	s3 := display.NewHopStats(3)
+	s3.AddTimeout()
+	stats[3] = s3
+	return stats
+}
+
+func TestMTRResult_TextDefault_MatchesFormatMTRStats(t *testing.T) {
+	stats := resultTestMTRStats()
+
+	res := mtrResult(stats, 4, "example.com", "text")
+
+	if got, want := resultText(t, res), formatMTRStats(stats, 4, "example.com"); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestMTRResult_JSON_HopStatsFields(t *testing.T) {
+	stats := resultTestMTRStats()
+
+	res := mtrResult(stats, 4, "example.com", "json")
+
+	report, ok := res.StructuredContent.(*mtrReport)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want *mtrReport", res.StructuredContent)
+	}
+	if report.Target != "example.com" || report.Cycles != 4 {
+		t.Errorf("target/cycles = %q/%d", report.Target, report.Cycles)
+	}
+	if len(report.Hops) != 2 {
+		t.Fatalf("hops = %d, want 2 (trailing timeout hop trimmed)", len(report.Hops))
+	}
+	h1 := report.Hops[0]
+	if h1.TTL != 1 || h1.IP != "192.168.1.1" || h1.Hostname != "gw.local" || h1.ASN != 64496 {
+		t.Errorf("hop1 = %+v", h1)
+	}
+	if h1.Sent != 4 || h1.Recv != 4 || h1.Loss != 0 {
+		t.Errorf("hop1 counters = %+v", h1)
+	}
+	h2 := report.Hops[1]
+	if h2.Sent != 2 || h2.Recv != 1 || h2.Loss != 50 {
+		t.Errorf("hop2 counters = %+v", h2)
+	}
+	if h2.BestMs != 10 || h2.AvgMs != 10 || h2.WorstMs != 10 {
+		t.Errorf("hop2 RTTs = %+v", h2)
+	}
+}
+
+func TestPingResult_JSON_RawProbeResults(t *testing.T) {
+	avg := 12.5
+	results := []globalping.PingProbeResult{
+		{
+			Probe:  globalping.ProbeInfo{City: "Paris", Country: "FR", ASN: 12322, Network: "Free SAS"},
+			Result: globalping.PingResult{Stats: globalping.PingStats{Total: 3, Rcv: 3, Avg: &avg}},
+		},
+	}
+
+	res := pingResult(results, "example.com", "json")
+
+	got, ok := res.StructuredContent.([]globalping.PingProbeResult)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want []globalping.PingProbeResult", res.StructuredContent)
+	}
+	if len(got) != 1 || got[0].Probe.City != "Paris" || *got[0].Result.Stats.Avg != 12.5 {
+		t.Errorf("payload = %+v", got)
+	}
+}
+
+func TestPingResult_TextDefault_MatchesFormat(t *testing.T) {
+	results := []globalping.PingProbeResult{{Probe: globalping.ProbeInfo{City: "Paris"}}}
+
+	res := pingResult(results, "example.com", "text")
+
+	if got, want := resultText(t, res), formatPingResults(results, "example.com"); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestDNSResult_JSON_RawProbeResults(t *testing.T) {
+	results := []globalping.DNSProbeResult{
+		{
+			Probe: globalping.ProbeInfo{City: "Tokyo", Country: "JP"},
+			Result: globalping.DNSResult{
+				StatusCode: 0,
+				Answers:    []globalping.DNSAnswer{{Name: "example.com.", Type: "A", Value: "93.184.216.34"}},
+			},
+		},
+	}
+
+	res := dnsResult(results, "example.com", false, "json")
+
+	got, ok := res.StructuredContent.([]globalping.DNSProbeResult)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want []globalping.DNSProbeResult", res.StructuredContent)
+	}
+	if len(got) != 1 || got[0].Result.Answers[0].Value != "93.184.216.34" {
+		t.Errorf("payload = %+v", got)
+	}
+}
+
+func TestDNSResult_TextDefault_MatchesFormat(t *testing.T) {
+	results := []globalping.DNSProbeResult{{Probe: globalping.ProbeInfo{City: "Tokyo"}}}
+
+	res := dnsResult(results, "example.com", true, "text")
+
+	if got, want := resultText(t, res), formatDNSResults(results, "example.com", true); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestProbeListResult_JSON_RawProbes(t *testing.T) {
+	probes := []globalping.Probe{
+		{Version: "1.0", Location: globalping.ProbeLocation{City: "Paris", Country: "FR", ASN: 12322}},
+	}
+
+	res := probeListResult(probes, "json")
+
+	got, ok := res.StructuredContent.([]globalping.Probe)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want []globalping.Probe", res.StructuredContent)
+	}
+	if len(got) != 1 || got[0].Location.City != "Paris" {
+		t.Errorf("payload = %+v", got)
+	}
+}
+
+func TestProbeListResult_TextDefault_MatchesFormat(t *testing.T) {
+	probes := []globalping.Probe{{Location: globalping.ProbeLocation{City: "Paris"}}}
+
+	res := probeListResult(probes, "text")
+
+	if got, want := resultText(t, res), formatProbeList(probes); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestASNResult_JSON_RawStruct(t *testing.T) {
+	r := &enrich.ASNResult{ASN: 15169, Name: "GOOGLE"}
+
+	res := asnResult(r, "json")
+
+	got, ok := res.StructuredContent.(*enrich.ASNResult)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want *enrich.ASNResult", res.StructuredContent)
+	}
+	if got.ASN != 15169 {
+		t.Errorf("payload = %+v", got)
+	}
+}
+
+func TestASNResult_TextDefault_MatchesFormat(t *testing.T) {
+	r := &enrich.ASNResult{ASN: 15169, Name: "GOOGLE"}
+
+	res := asnResult(r, "text")
+
+	if got, want := resultText(t, res), formatASNResult(r); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestGeoResult_JSON_RawStruct(t *testing.T) {
+	r := &enrich.GeoResult{City: "Mountain View", Country: "US"}
+
+	res := geoResult(r, "json")
+
+	got, ok := res.StructuredContent.(*enrich.GeoResult)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want *enrich.GeoResult", res.StructuredContent)
+	}
+	if got.City != "Mountain View" {
+		t.Errorf("payload = %+v", got)
+	}
+}
+
+func TestGeoResult_TextDefault_MatchesFormat(t *testing.T) {
+	r := &enrich.GeoResult{City: "Mountain View", Country: "US", CountryName: "United States"}
+
+	res := geoResult(r, "text")
+
+	if got, want := resultText(t, res), formatGeoResult(r); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRDNSResult_JSON_IPAndHostname(t *testing.T) {
+	res := rdnsResult("8.8.8.8", "dns.google", "json")
+
+	got, ok := res.StructuredContent.(*rdnsRecord)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want *rdnsRecord", res.StructuredContent)
+	}
+	if got.IP != "8.8.8.8" || got.Hostname != "dns.google" {
+		t.Errorf("payload = %+v", got)
+	}
+}
+
+func TestRDNSResult_TextDefault_MatchesFormat(t *testing.T) {
+	res := rdnsResult("8.8.8.8", "dns.google", "text")
+
+	if got, want := resultText(t, res), formatRDNSResult("8.8.8.8", "dns.google"); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
