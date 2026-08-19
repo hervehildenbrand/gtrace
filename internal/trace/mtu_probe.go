@@ -15,8 +15,9 @@ import (
 
 // Probing bounds.
 const (
-	// MTUMaxProbesPerTTL caps the probes spent discovering one hop's MTU.
-	MTUMaxProbesPerTTL = 10
+	// MTUMaxProbesPerTTL caps the probes spent discovering one hop's MTU
+	// (sized to fit a full black-hole search plus its confirmation probe).
+	MTUMaxProbesPerTTL = 12
 
 	// MTUConvergence is the binary-search window below which we stop.
 	MTUConvergence = 8
@@ -71,6 +72,7 @@ const (
 	mtuPhaseRetry
 	mtuPhaseSmallProbe
 	mtuPhaseSearch
+	mtuPhaseConfirm
 )
 
 // MTUProbeState tracks per-hop MTU discovery. Create once per trace with
@@ -126,6 +128,23 @@ func (s *MTUProbeState) Next(ev MTUProbeEvent) MTUProbeDecision {
 		}
 		// Hop is simply unresponsive.
 		return s.done(0)
+	case mtuPhaseConfirm:
+		// One probe back at the pre-search candidate decides whether the
+		// silent drops were size-related or just a lossy/rate-limited hop.
+		switch ev.Type {
+		case MTUEventHopReply:
+			s.blackhole = false
+			return s.done(s.Candidate)
+		case MTUEventFragNeeded, MTUEventEMSGSIZE:
+			// ICMP is arriving after all: not a black hole.
+			s.blackhole = false
+			if m := ev.ReportedMTU; m >= s.MinSize && m < s.Candidate {
+				return s.done(m)
+			}
+			return s.done(s.low)
+		default: // timeout again: the black-hole verdict stands
+			return s.done(s.low)
+		}
 	default: // mtuPhaseSearch
 		switch ev.Type {
 		case MTUEventHopReply:
@@ -162,6 +181,13 @@ func (s *MTUProbeState) startSearch(low, high int) MTUProbeDecision {
 
 func (s *MTUProbeState) searchStep() MTUProbeDecision {
 	if s.high-s.low < MTUConvergence {
+		if s.blackhole {
+			// Converged without any ICMP: verify the drops are really
+			// size-related before condemning the hop (rate limiters
+			// otherwise produce bogus black-hole verdicts).
+			s.phase = mtuPhaseConfirm
+			return s.probe(s.Candidate)
+		}
 		return s.done(s.low)
 	}
 	return s.probe(MTUSearchMidpoint(s.low, s.high))
@@ -170,10 +196,14 @@ func (s *MTUProbeState) searchStep() MTUProbeDecision {
 // probe requests another probe unless the per-TTL budget is exhausted.
 func (s *MTUProbeState) probe(size int) MTUProbeDecision {
 	if s.probes >= MTUMaxProbesPerTTL {
-		if s.phase == mtuPhaseSearch {
+		if s.phase == mtuPhaseSearch && !s.blackhole {
 			return s.done(s.low) // low is the best confirmed size
 		}
-		return s.done(0) // nothing confirmed; lowered Candidate is retained
+		// Unconfirmed black-hole search (or nothing confirmed at all):
+		// report no MTU and keep the pre-search candidate intact so one
+		// lossy hop cannot poison the rest of the path.
+		s.blackhole = false
+		return s.done(0)
 	}
 	s.lastSize = size
 	return MTUProbeDecision{Action: MTUActionProbe, Size: size}
