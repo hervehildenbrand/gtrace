@@ -86,6 +86,72 @@ func ipAvgRTT(h *hop.Hop, ip string) time.Duration {
 	return total / time.Duration(count)
 }
 
+// flowIPs maps FlowID -> responding IP for hops probed with --ecmp-flows.
+func flowIPs(h *hop.Hop) map[int]string {
+	m := map[int]string{}
+	for _, p := range h.Probes {
+		if !p.Timeout && p.IP != nil && p.FlowID > 0 {
+			if _, ok := m[p.FlowID]; !ok {
+				m[p.FlowID] = p.IP.String()
+			}
+		}
+	}
+	return m
+}
+
+// connectHops wires the previous hop's nodes to the current hop's nodes.
+// When both hops carry FlowIDs (--ecmp-flows), same-flow nodes connect
+// pairwise so each real path renders as its own strand; anything the flow
+// pass leaves unwired falls back to the full mesh so no node dangles.
+func (g *pathGraph) connectHops(prevHop, curHop *hop.Hop, prev, cur []string, source int) {
+	if prevHop != nil && curHop != nil {
+		pf, cf := flowIPs(prevHop), flowIPs(curHop)
+		if len(pf) > 0 && len(cf) > 0 {
+			keyByLabel := func(keys []string, label string) string {
+				for _, k := range keys {
+					if g.nodes[k].label == label {
+						return k
+					}
+				}
+				return ""
+			}
+			linkedIn, linkedOut := map[string]bool{}, map[string]bool{}
+			for f, pip := range pf {
+				cip, ok := cf[f]
+				if !ok {
+					continue
+				}
+				pk, ck := keyByLabel(prev, pip), keyByLabel(cur, cip)
+				if pk == "" || ck == "" {
+					continue
+				}
+				g.addEdge(pk, ck, source)
+				linkedOut[pk], linkedIn[ck] = true, true
+			}
+			for _, c := range cur {
+				if !linkedIn[c] {
+					for _, p := range prev {
+						g.addEdge(p, c, source)
+					}
+				}
+			}
+			for _, p := range prev {
+				if !linkedOut[p] {
+					for _, c := range cur {
+						g.addEdge(p, c, source)
+					}
+				}
+			}
+			return
+		}
+	}
+	for _, p := range prev {
+		for _, c := range cur {
+			g.addEdge(p, c, source)
+		}
+	}
+}
+
 // distinctIPs returns the distinct responding IPs of a hop in probe order.
 func distinctIPs(h *hop.Hop) []string {
 	var ips []string
@@ -103,10 +169,8 @@ func distinctIPs(h *hop.Hop) []string {
 	return ips
 }
 
-// buildGraph merges trace results into a path DAG. Within a source,
-// consecutive hop node sets are fully connected.
-// ponytail: mesh edges overstate what ICMP tells us; FlowID-based per-flow
-// path reconstruction is the upgrade path if exact ECMP wiring matters.
+// buildGraph merges trace results into a path DAG. Consecutive hops connect
+// per-flow when FlowIDs were tracked (--ecmp-flows), else as a full mesh.
 func buildGraph(results []*hop.TraceResult) *pathGraph {
 	g := &pathGraph{
 		nodes:        map[string]*graphNode{},
@@ -132,10 +196,13 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 
 		visits := map[string]int{} // per-source IP revisit counter (loop guard)
 		prev := []string{srcKey}
+		var prevH *hop.Hop // nil for source and timeout nodes (no flow data)
 		for hi := 0; hi < len(hops); hi++ {
 			h := hops[hi]
+			curH := h
 			var cur []string
 			if allTimeout(h) {
+				curH = nil
 				// collapse a run of consecutive silent hops into one node
 				run := 1
 				for hi+run < len(hops) && allTimeout(hops[hi+run]) {
@@ -174,12 +241,8 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 					visits[ip]++
 				}
 			}
-			for _, p := range prev {
-				for _, c := range cur {
-					g.addEdge(p, c, i)
-				}
-			}
-			prev = cur
+			g.connectHops(prevH, curH, prev, cur, i)
+			prev, prevH = cur, curH
 		}
 
 		if tr.ReachedTarget {
