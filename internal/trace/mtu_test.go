@@ -107,3 +107,59 @@ func TestCommonMTUValues(t *testing.T) {
 		t.Errorf("MinMTU = %d, want 68 (IPv4 minimum)", MinMTU)
 	}
 }
+
+func TestParseMTUFromICMPv6PacketTooBig(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    []byte
+		wantMTU int
+		wantOK  bool
+	}{
+		{
+			name: "valid packet too big with MTU 1400",
+			// Type 2, Code 0, checksum, MTU (32-bit big-endian)
+			data:    []byte{2, 0, 0x12, 0x34, 0x00, 0x00, 0x05, 0x78},
+			wantMTU: 1400,
+			wantOK:  true,
+		},
+		{
+			name:    "valid packet too big with MTU 1280",
+			data:    []byte{2, 0, 0, 0, 0x00, 0x00, 0x05, 0x00},
+			wantMTU: 1280,
+			wantOK:  true,
+		},
+		{
+			name:    "wrong type",
+			data:    []byte{3, 0, 0, 0, 0x00, 0x00, 0x05, 0x78},
+			wantMTU: 0,
+			wantOK:  false,
+		},
+		{
+			name:    "MTU below IPv6 minimum",
+			data:    []byte{2, 0, 0, 0, 0x00, 0x00, 0x04, 0x00}, // 1024
+			wantMTU: 0,
+			wantOK:  false,
+		},
+		{
+			name:    "truncated message",
+			data:    []byte{2, 0, 0, 0, 0x00},
+			wantMTU: 0,
+			wantOK:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mtu, ok := ParseMTUFromICMPv6PacketTooBig(tt.data)
+			if mtu != tt.wantMTU || ok != tt.wantOK {
+				t.Errorf("ParseMTUFromICMPv6PacketTooBig() = (%d, %v), want (%d, %v)", mtu, ok, tt.wantMTU, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestMinMTUv6_IsRFC8200Minimum(t *testing.T) {
+	if MinMTUv6 != 1280 {
+		t.Errorf("MinMTUv6 = %d, want 1280", MinMTUv6)
+	}
+}
