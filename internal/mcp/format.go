@@ -77,6 +77,9 @@ func formatTraceResult(tr *hop.TraceResult) string {
 	} else {
 		fmt.Fprintf(&sb, "Target not reached (%d hops)\n", tr.TotalHops())
 	}
+	if tr.PathMTU > 0 {
+		fmt.Fprintf(&sb, "Path MTU: %d\n", tr.PathMTU)
+	}
 	if !tr.StartTime.IsZero() && !tr.EndTime.IsZero() {
 		fmt.Fprintf(&sb, "Duration: %v\n", tr.EndTime.Sub(tr.StartTime).Round(time.Millisecond))
 	}
@@ -165,9 +168,13 @@ func formatHop(sb *strings.Builder, h *hop.Hop) {
 		sb.WriteString("    [NAT detected]\n")
 	}
 
-	// MTU
+	// MTU ("blackhole" marks hops that silently drop oversized packets)
 	if h.MTU > 0 {
-		fmt.Fprintf(sb, "    [MTU: %d]\n", h.MTU)
+		if h.MTUBlackhole {
+			fmt.Fprintf(sb, "    [MTU: %d blackhole]\n", h.MTU)
+		} else {
+			fmt.Fprintf(sb, "    [MTU: %d]\n", h.MTU)
+		}
 	}
 
 	// Geo

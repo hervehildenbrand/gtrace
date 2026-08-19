@@ -64,7 +64,7 @@ func tracerouteTool() mcp.Tool {
 			mcp.Description("ECMP flow variations per hop (0=disabled, 8=recommended)"),
 		),
 		mcp.WithBoolean("discover_mtu",
-			mcp.Description("Enable Path MTU Discovery"),
+			mcp.Description("Active per-hop Path MTU Discovery (icmp/udp only): DF-bit probes at varying sizes report each hop's MTU, detect PMTUD black holes, and include the end-to-end path MTU (pathMtu in JSON output)"),
 		),
 		mcp.WithNumber("probe_size",
 			mcp.Description("Probe packet size in bytes (default: 64)"),
