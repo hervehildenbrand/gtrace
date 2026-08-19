@@ -1,5 +1,11 @@
 package trace
 
+import (
+	"net"
+
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
+)
+
 // Active per-hop Path MTU Discovery state machine (tracepath-style).
 //
 // The engine sends one probe at a time with the DF bit set and feeds the
@@ -178,4 +184,81 @@ func (s *MTUProbeState) done(mtu int) MTUProbeDecision {
 		s.Candidate = mtu
 	}
 	return MTUProbeDecision{Action: MTUActionDone, MTU: mtu, Blackhole: s.blackhole && mtu > 0}
+}
+
+// classifyMTUProbe maps a probe outcome onto a state-machine event.
+func classifyMTUProbe(pr *probeResult, err error) MTUProbeEvent {
+	if err != nil {
+		if isEMSGSIZE(err) {
+			return MTUProbeEvent{Type: MTUEventEMSGSIZE}
+		}
+		return MTUProbeEvent{Type: MTUEventTimeout}
+	}
+	if pr == nil {
+		return MTUProbeEvent{Type: MTUEventTimeout}
+	}
+	switch {
+	case pr.ICMPType == 3 && pr.ICMPCode == 4: // IPv4 Fragmentation Needed
+		return MTUProbeEvent{Type: MTUEventFragNeeded, ReportedMTU: pr.MTU}
+	case pr.ICMPType == 2: // ICMPv6 Packet Too Big
+		return MTUProbeEvent{Type: MTUEventFragNeeded, ReportedMTU: pr.MTU}
+	default:
+		return MTUProbeEvent{Type: MTUEventHopReply}
+	}
+}
+
+// runMTUDiscovery drives the state machine for one TTL. send transmits a DF
+// probe of the given total IP-layer size and returns the outcome. The
+// returned probeResult is the last hop reply (nil if the hop never replied),
+// so callers record the hop's identity rather than a frag-needed reporter's.
+func runMTUDiscovery(state *MTUProbeState, send func(size int) (MTUProbeEvent, *probeResult)) (MTUProbeDecision, *probeResult) {
+	size := state.Candidate
+	var lastReply *probeResult
+	for {
+		ev, pr := send(size)
+		if ev.Type == MTUEventHopReply && pr != nil {
+			lastReply = pr
+		}
+		d := state.Next(ev)
+		if d.Action == MTUActionDone {
+			return d, lastReply
+		}
+		size = d.Size
+	}
+}
+
+// newMTUStateForTarget seeds discovery state from the egress interface MTU.
+func newMTUStateForTarget(target net.IP) *MTUProbeState {
+	minSize := MinMTU
+	if IsIPv6(target) {
+		minSize = MinMTUv6
+	}
+	start := GetEgressMTU(target)
+	if start < minSize {
+		start = minSize
+	}
+	return NewMTUProbeState(start, minSize)
+}
+
+// recordMTUOutcome applies a per-TTL discovery verdict to the hop and
+// reports whether the replying hop is the target.
+func recordMTUOutcome(h *hop.Hop, d MTUProbeDecision, pr *probeResult, target net.IP) bool {
+	reached := false
+	if pr != nil && pr.IP != nil {
+		h.Probes = append(h.Probes, hop.Probe{IP: pr.IP, RTT: pr.RTT, ResponseTTL: pr.ResponseTTL, IPID: pr.IPID, ICMPType: pr.ICMPType, ICMPCode: pr.ICMPCode, OriginalTTL: pr.OriginalTTL, TransportInfo: pr.TransportInfo})
+		if len(pr.MPLS) > 0 {
+			h.SetMPLS(pr.MPLS)
+		}
+		if pr.InterfaceInfo != nil {
+			h.InterfaceInfo = pr.InterfaceInfo
+		}
+		reached = pr.IP.Equal(target)
+	} else {
+		h.AddTimeout()
+	}
+	if d.MTU > 0 {
+		h.MTU = d.MTU
+		h.MTUBlackhole = d.Blackhole
+	}
+	return reached
 }

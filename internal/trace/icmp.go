@@ -52,10 +52,12 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 		conn.p4 = ipv4.NewPacketConn(pc)
 	}
 
+	var mtuState *MTUProbeState
 	if t.config.DiscoverMTU {
 		if err := applyDontFragment(pc, IsIPv6(target)); err != nil {
 			return nil, fmt.Errorf("failed to set DF bit: %w", err)
 		}
+		mtuState = newMTUStateForTarget(target)
 	}
 
 	for ttl := 1; ttl <= t.config.MaxHops; ttl++ {
@@ -74,12 +76,24 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 			probeCount = t.config.ECMPFlows
 		}
 
-		for i := 0; i < probeCount; i++ {
+		if mtuState != nil {
+			// Active MTU discovery drives its own probe loop for this TTL.
+			mtuState.NextTTL()
+			d, pr := runMTUDiscovery(mtuState, func(size int) (MTUProbeEvent, *probeResult) {
+				pr, err := t.sendProbe(conn, target, ttl, 0, 0, size)
+				return classifyMTUProbe(pr, err), pr
+			})
+			if recordMTUOutcome(h, d, pr, target) {
+				reached = true
+			}
+		}
+
+		for i := 0; mtuState == nil && i < probeCount; i++ {
 			flowID := 0
 			if t.config.ECMPFlows > 0 {
 				flowID = i + 1
 			}
-			pr, err := t.sendProbe(conn, target, ttl, i, flowID)
+			pr, err := t.sendProbe(conn, target, ttl, i, flowID, 0)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
 					h.AddTimeout()
@@ -144,6 +158,10 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 		}
 	}
 
+	if mtuState != nil && result.ReachedTarget {
+		result.PathMTU = mtuState.Candidate
+	}
+
 	result.EndTime = time.Now()
 	return result, nil
 }
@@ -180,8 +198,9 @@ type icmpConn struct {
 }
 
 // sendProbe sends a single ICMP probe and waits for response.
-// Supports both IPv4 and IPv6 targets. flowID > 0 varies the payload for ECMP diversity.
-func (t *ICMPTracer) sendProbe(conn *icmpConn, target net.IP, ttl, seq, flowID int) (*probeResult, error) {
+// Supports both IPv4 and IPv6 targets. flowID > 0 varies the payload for ECMP
+// diversity. mtuSize > 0 pads the probe to that total IP-layer size.
+func (t *ICMPTracer) sendProbe(conn *icmpConn, target net.IP, ttl, seq, flowID, mtuSize int) (*probeResult, error) {
 	isV6 := IsIPv6(target)
 
 	// Set TTL/Hop Limit for this probe
@@ -196,7 +215,7 @@ func (t *ICMPTracer) sendProbe(conn *icmpConn, target net.IP, ttl, seq, flowID i
 	}
 
 	// Build and send ICMP Echo Request
-	msg := t.buildEchoRequestForIP(ttl, seq, target, flowID)
+	msg := t.buildEchoRequestForIP(ttl, seq, target, flowID, mtuSize)
 	msgBytes, err := msg.Marshal(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal ICMP message: %w", err)
@@ -298,6 +317,20 @@ func (t *ICMPTracer) sendProbe(conn *icmpConn, target net.IP, ttl, seq, flowID i
 			}
 		}
 
+		// Check for Packet Too Big (IPv6 path MTU discovery)
+		if isPacketTooBig(rm.Type, target) {
+			if body, ok := rm.Body.(*icmp.PacketTooBig); ok {
+				minLen := ipHdrSize + 8
+				if len(body.Data) >= minLen {
+					origID := int(body.Data[ipHdrSize+4])<<8 | int(body.Data[ipHdrSize+5])
+					if origID == t.id {
+						mtu, _ := ParseMTUFromICMPv6PacketTooBig(reply[:n])
+						return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, ICMPType: 2, ICMPCode: rm.Code}, nil
+					}
+				}
+			}
+		}
+
 		// Check for Destination Unreachable
 		if isDestUnreachable(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
@@ -347,8 +380,10 @@ func (t *ICMPTracer) buildEchoRequest(ttl, seq int) *icmp.Message {
 }
 
 // buildEchoRequestForIP creates an ICMP Echo Request message for the given IP version.
-// When flowID > 0, extra bytes are appended to vary the ICMP checksum for ECMP path diversity.
-func (t *ICMPTracer) buildEchoRequestForIP(ttl, seq int, target net.IP, flowID int) *icmp.Message {
+// When flowID > 0, extra bytes are appended to vary the ICMP checksum for ECMP path
+// diversity. When mtuSize > 0, the payload is padded so the packet's total IP-layer
+// size (IP header + ICMP header + payload) equals mtuSize.
+func (t *ICMPTracer) buildEchoRequestForIP(ttl, seq int, target net.IP, flowID, mtuSize int) *icmp.Message {
 	var msgType icmp.Type
 	if IsIPv6(target) {
 		msgType = ipv6.ICMPTypeEchoRequest
@@ -368,7 +403,12 @@ func (t *ICMPTracer) buildEchoRequestForIP(ttl, seq int, target net.IP, flowID i
 	}
 
 	// Pad payload to reach desired probe size
-	if t.config.ProbeSize > 0 {
+	if mtuSize > 0 {
+		targetPayload := mtuSize - IPHeaderSize(target) - 8 // ICMP header is 8 bytes
+		if targetPayload > len(payload) {
+			payload = append(payload, make([]byte, targetPayload-len(payload))...)
+		}
+	} else if t.config.ProbeSize > 0 {
 		currentSize := len(payload) + 8 // ICMP header is 8 bytes
 		if t.config.ProbeSize > currentSize {
 			padding := make([]byte, t.config.ProbeSize-currentSize)
@@ -438,4 +478,10 @@ func isDestUnreachable(msgType icmp.Type, target net.IP) bool {
 		return msgType == ipv6.ICMPTypeDestinationUnreachable
 	}
 	return msgType == ipv4.ICMPTypeDestinationUnreachable
+}
+
+// isPacketTooBig checks if the ICMP type is Packet Too Big (IPv6 only;
+// IPv4 signals the same condition via Destination Unreachable code 4).
+func isPacketTooBig(msgType icmp.Type, target net.IP) bool {
+	return IsIPv6(target) && msgType == ipv6.ICMPTypePacketTooBig
 }
