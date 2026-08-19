@@ -276,3 +276,68 @@ func TestMTUProbeState_FragNeededEchoingProbeSize_FallsBackToSearch(t *testing.T
 		t.Errorf("probes = %d, want <= %d", probes, MTUMaxProbesPerTTL)
 	}
 }
+
+func TestMTUProbeState_RateLimitedHop_ConfirmationClearsBlackhole(t *testing.T) {
+	// An ICMP-rate-limited hop: drops the first full-size probes and every
+	// binary-search probe, but the final confirmation probe at the original
+	// candidate gets through. Real-world case: 193.251.133.3 (Orange) gave
+	// bogus "blackhole 112/828" verdicts without confirmation.
+	s := NewMTUProbeState(1500, MinMTU)
+	calls := 0
+	respond := func(size int) MTUProbeEvent {
+		calls++
+		if size == MinMTU || (size == 1500 && calls > 3) {
+			return MTUProbeEvent{Type: MTUEventHopReply}
+		}
+		return MTUProbeEvent{Type: MTUEventTimeout}
+	}
+	d, probes := driveTTL(t, s, respond)
+	if d.MTU != 1500 || d.Blackhole {
+		t.Errorf("Done = {MTU:%d Blackhole:%v}, want {MTU:1500 Blackhole:false} (confirmation passed => not size-related)", d.MTU, d.Blackhole)
+	}
+	if s.Candidate != 1500 {
+		t.Errorf("Candidate = %d, want 1500 (lossy hop must not poison the path estimate)", s.Candidate)
+	}
+	if probes > MTUMaxProbesPerTTL {
+		t.Errorf("probes = %d, want <= %d", probes, MTUMaxProbesPerTTL)
+	}
+}
+
+func TestMTUProbeState_GenuineBlackhole_ConfirmationFails(t *testing.T) {
+	// Size-dependent silent drop: the confirmation probe at the original
+	// candidate times out too, so the blackhole verdict stands.
+	s := NewMTUProbeState(1500, MinMTU)
+	respond := pathWithMTU(1400, func(size int) MTUProbeEvent {
+		return MTUProbeEvent{Type: MTUEventTimeout}
+	})
+	d, probes := driveTTL(t, s, respond)
+	if !d.Blackhole || d.MTU < 1400-MTUConvergence || d.MTU > 1400 {
+		t.Errorf("Done = {MTU:%d Blackhole:%v}, want blackhole with MTU within %d of 1400", d.MTU, d.Blackhole, MTUConvergence)
+	}
+	if probes > MTUMaxProbesPerTTL {
+		t.Errorf("probes = %d, want <= %d", probes, MTUMaxProbesPerTTL)
+	}
+}
+
+func TestMTUProbeState_UnconfirmedSearchBail_DoesNotPoisonPath(t *testing.T) {
+	// Search range too large to converge within the probe budget: without a
+	// failed confirmation there is no verdict - report nothing and keep the
+	// pre-search candidate for later hops.
+	s := NewMTUProbeState(65536, MinMTU)
+	respond := func(size int) MTUProbeEvent {
+		if size == MinMTU {
+			return MTUProbeEvent{Type: MTUEventHopReply}
+		}
+		return MTUProbeEvent{Type: MTUEventTimeout}
+	}
+	d, probes := driveTTL(t, s, respond)
+	if d.MTU != 0 || d.Blackhole {
+		t.Errorf("Done = {MTU:%d Blackhole:%v}, want {MTU:0 Blackhole:false} (nothing confirmed)", d.MTU, d.Blackhole)
+	}
+	if s.Candidate != 65536 {
+		t.Errorf("Candidate = %d, want 65536 (unconfirmed search must not lower the path estimate)", s.Candidate)
+	}
+	if probes > MTUMaxProbesPerTTL {
+		t.Errorf("probes = %d, want <= %d", probes, MTUMaxProbesPerTTL)
+	}
+}

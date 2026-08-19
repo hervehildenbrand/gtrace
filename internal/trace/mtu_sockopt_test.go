@@ -2,6 +2,7 @@ package trace
 
 import (
 	"net"
+	"os"
 	"syscall"
 	"testing"
 )
@@ -51,5 +52,28 @@ func TestApplyDontFragment_IPv6PacketConn(t *testing.T) {
 
 	if err := applyDontFragment(pc, true); err != nil {
 		t.Errorf("applyDontFragment(v6) = %v, want nil", err)
+	}
+}
+
+func TestIsEMSGSIZE_WrappedErrors(t *testing.T) {
+	// net.IPConn.WriteTo wraps the errno in OpError -> SyscallError; the
+	// ICMP engine's oversized sends must still classify as EMSGSIZE.
+	wrapped := &net.OpError{Op: "write", Err: os.NewSyscallError("sendmsg", syscall.EMSGSIZE)}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"raw errno", syscall.EMSGSIZE, true},
+		{"wrapped in OpError+SyscallError", wrapped, true},
+		{"nil", nil, false},
+		{"other errno", syscall.ECONNREFUSED, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isEMSGSIZE(tt.err); got != tt.want {
+				t.Errorf("isEMSGSIZE(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
