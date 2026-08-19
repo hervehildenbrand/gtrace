@@ -1032,3 +1032,46 @@ func TestRootCommand_GraphWithMultipleTargetsRejected(t *testing.T) {
 		t.Errorf("error should mention --graph, got: %v", err)
 	}
 }
+
+func TestRootCommand_ParsesMTUFlag(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "--mtu", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	mtu, _ := cmd.Flags().GetBool("mtu")
+	if !mtu {
+		t.Error("expected mtu to be true")
+	}
+}
+
+func TestRootCommand_DiscoverMTUFlagIsDeprecatedAlias(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "--discover-mtu", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	f := cmd.Flags().Lookup("discover-mtu")
+	if f == nil {
+		t.Fatal("discover-mtu flag missing")
+	}
+	if f.Deprecated == "" {
+		t.Error("expected discover-mtu to be marked deprecated")
+	}
+	if !f.Hidden {
+		t.Error("expected discover-mtu to be hidden")
+	}
+	if f.Value.String() != "true" {
+		t.Error("expected --discover-mtu to still set the value")
+	}
+}

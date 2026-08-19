@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestSetDontFragment_ValidSocket(t *testing.T) {
+func TestSetDontFragmentProbe_ValidSocket(t *testing.T) {
 	// Create a UDP socket for testing
 	fd, err := createRawSocket(syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP)
 	if err != nil {
@@ -15,14 +15,14 @@ func TestSetDontFragment_ValidSocket(t *testing.T) {
 	}
 	defer closeSocket(fd)
 
-	err = setDontFragment(fd)
+	err = setDontFragmentProbe(fd)
 	if err != nil {
-		t.Errorf("setDontFragment() error = %v", err)
+		t.Errorf("setDontFragmentProbe() error = %v", err)
 	}
 }
 
-func TestSetDontFragment_InvalidSocket(t *testing.T) {
-	err := setDontFragment(invalidSocket)
+func TestSetDontFragmentProbe_InvalidSocket(t *testing.T) {
+	err := setDontFragmentProbe(invalidSocket)
 	if err == nil {
 		t.Error("expected error for invalid socket")
 	}

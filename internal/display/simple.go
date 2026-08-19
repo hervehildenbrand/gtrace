@@ -95,7 +95,11 @@ func (r *SimpleRenderer) RenderHop(h *hop.Hop) string {
 
 	// MTU indicator (outside if/else: EMSGSIZE causes all-timeout hops with MTU set)
 	if h.MTU > 0 {
-		parts = append(parts, fmt.Sprintf("[MTU:%d]", h.MTU))
+		if h.MTUBlackhole {
+			parts = append(parts, fmt.Sprintf("[MTU:%d blackhole]", h.MTU))
+		} else {
+			parts = append(parts, fmt.Sprintf("[MTU:%d]", h.MTU))
+		}
 	}
 
 	return strings.Join(parts, "  ")

@@ -2,6 +2,7 @@ package display
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,5 +104,24 @@ func TestTUIModel_GetStatusInfo_ReturnsInfo(t *testing.T) {
 	}
 	if !info.HasMPLS {
 		t.Error("expected HasMPLS to be true")
+	}
+}
+
+func TestTUIModel_FormatHopRow_ShowsMTU(t *testing.T) {
+	model := NewTUIModel("google.com", "8.8.8.8")
+	h := hop.NewHop(3)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	h.MTU = 1400
+
+	row := model.formatHopRow(h)
+
+	if !strings.Contains(row, "[MTU:1400]") {
+		t.Errorf("expected [MTU:1400] in row, got %q", row)
+	}
+
+	h.MTUBlackhole = true
+	row = model.formatHopRow(h)
+	if !strings.Contains(row, "[MTU:1400!]") {
+		t.Errorf("expected [MTU:1400!] blackhole marker in row, got %q", row)
 	}
 }

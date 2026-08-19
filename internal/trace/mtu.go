@@ -1,9 +1,7 @@
 // Package trace implements traceroute functionality using various protocols.
 package trace
 
-import (
-	"fmt"
-)
+import "net"
 
 // MTU constants
 const (
@@ -13,39 +11,9 @@ const (
 	// MinMTU is the minimum MTU for IPv4 (RFC 791)
 	MinMTU = 68
 
-	// JumboMTU threshold - MTUs above this are considered jumbo frames
-	JumboMTU = 1500
+	// MinMTUv6 is the minimum MTU for IPv6 (RFC 8200)
+	MinMTUv6 = 1280
 )
-
-// MTUInfo contains MTU discovery results for a hop.
-type MTUInfo struct {
-	// Discovered indicates whether MTU was successfully discovered
-	Discovered bool
-
-	// MTU is the discovered Maximum Transmission Unit in bytes
-	MTU int
-
-	// FragmentationNeeded indicates if we received ICMP Fragmentation Needed
-	FragmentationNeeded bool
-}
-
-// String returns a formatted string for MTU display.
-func (m MTUInfo) String() string {
-	if !m.Discovered || m.MTU == 0 {
-		return ""
-	}
-	return fmt.Sprintf("MTU:%d", m.MTU)
-}
-
-// IsReduced returns true if the MTU is below the standard 1500 bytes.
-func (m MTUInfo) IsReduced() bool {
-	return m.Discovered && m.MTU > 0 && m.MTU < StandardMTU
-}
-
-// IsJumbo returns true if the MTU is above the standard 1500 bytes (jumbo frames).
-func (m MTUInfo) IsJumbo() bool {
-	return m.Discovered && m.MTU > JumboMTU
-}
 
 // ParseMTUFromICMP extracts the MTU value from an ICMP Destination Unreachable
 // (Fragmentation Needed) message.
@@ -95,64 +63,56 @@ func MTUSearchMidpoint(low, high int) int {
 	return (low + high) / 2
 }
 
-// MTUDiscoveryConfig holds configuration for Path MTU discovery.
-type MTUDiscoveryConfig struct {
-	// StartMTU is the initial MTU to test (default: 1500)
-	StartMTU int
-
-	// MinMTU is the minimum MTU to test (default: 68)
-	MinMTU int
-
-	// MaxIterations limits the binary search iterations
-	MaxIterations int
-}
-
-// DefaultMTUDiscoveryConfig returns sensible defaults for PMTUD.
-func DefaultMTUDiscoveryConfig() *MTUDiscoveryConfig {
-	return &MTUDiscoveryConfig{
-		StartMTU:      StandardMTU,
-		MinMTU:        576, // Common minimum for Internet paths
-		MaxIterations: 10,  // Enough for binary search in typical range
+// ParseMTUFromICMPv6PacketTooBig extracts the MTU from an ICMPv6 Packet Too
+// Big message (RFC 4443 section 3.2).
+//
+// Message structure:
+// - Type (1 byte): 2 (Packet Too Big)
+// - Code (1 byte): 0
+// - Checksum (2 bytes)
+// - MTU (4 bytes) - big-endian
+// - As much of the invoking packet as fits
+//
+// Returns the MTU and true if successfully parsed, or 0 and false otherwise.
+func ParseMTUFromICMPv6PacketTooBig(data []byte) (int, bool) {
+	if len(data) < 8 {
+		return 0, false
 	}
+	if data[0] != 2 {
+		return 0, false
+	}
+	mtu := int(data[4])<<24 | int(data[5])<<16 | int(data[6])<<8 | int(data[7])
+	if mtu < MinMTUv6 || mtu > 65535 {
+		return 0, false
+	}
+	return mtu, true
 }
 
-// MTUProbeResult represents the result of an MTU probe.
-type MTUProbeResult struct {
-	// Size is the packet size that was sent
-	Size int
-
-	// Success indicates if the packet got through
-	Success bool
-
-	// ReportedMTU is the MTU reported in ICMP Fragmentation Needed (if any)
-	ReportedMTU int
-}
-
-// CalculatePathMTU determines the path MTU given a series of probe results.
-// Uses binary search to narrow down the maximum working MTU.
-func CalculatePathMTU(results []MTUProbeResult) int {
-	if len(results) == 0 {
+// GetEgressMTU returns the MTU of the local interface that routes toward
+// target, falling back to StandardMTU when it cannot be determined.
+// Dialing UDP performs no I/O; it only resolves the local source address.
+func GetEgressMTU(target net.IP) int {
+	conn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: target, Port: 33434})
+	if err != nil {
 		return StandardMTU
 	}
+	localIP := conn.LocalAddr().(*net.UDPAddr).IP
+	_ = conn.Close()
 
-	// Find the largest successful probe
-	maxSuccess := 0
-	for _, r := range results {
-		if r.Success && r.Size > maxSuccess {
-			maxSuccess = r.Size
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return StandardMTU
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.Equal(localIP) && iface.MTU >= MinMTU {
+				return iface.MTU
+			}
 		}
 	}
-
-	// If we have a reported MTU from ICMP, prefer that
-	for _, r := range results {
-		if r.ReportedMTU > 0 && r.ReportedMTU < StandardMTU {
-			return r.ReportedMTU
-		}
-	}
-
-	if maxSuccess > 0 {
-		return maxSuccess
-	}
-
 	return StandardMTU
 }

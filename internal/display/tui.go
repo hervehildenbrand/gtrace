@@ -43,6 +43,9 @@ var (
 	mplsStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("141"))
 
+	mtuStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214"))
+
 	statusStyle = lipgloss.NewStyle().
 			Background(lipgloss.Color("235")).
 			Padding(0, 1)
@@ -275,6 +278,16 @@ func (m *TUIModel) formatHopRow(h *hop.Hop) string {
 	if len(h.MPLS) > 0 {
 		b.WriteString(" ")
 		b.WriteString(mplsStyle.Render("[MPLS]"))
+	}
+
+	// MTU indicator ("!" marks a PMTUD black hole)
+	if h.MTU > 0 {
+		marker := fmt.Sprintf("[MTU:%d]", h.MTU)
+		if h.MTUBlackhole {
+			marker = fmt.Sprintf("[MTU:%d!]", h.MTU)
+		}
+		b.WriteString(" ")
+		b.WriteString(mtuStyle.Render(marker))
 	}
 
 	return b.String()

@@ -304,3 +304,34 @@ func createTestTrace() *hop.TraceResult {
 
 	return tr
 }
+
+func TestJSONExporter_Export_IncludesPathMTUAndBlackhole(t *testing.T) {
+	tr := hop.NewTraceResult("example.com", "93.184.216.34")
+	tr.PathMTU = 1400
+	h := hop.NewHop(3)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	h.MTU = 1400
+	h.MTUBlackhole = true
+	tr.AddHop(h)
+
+	var buf bytes.Buffer
+	if err := NewJSONExporter().Export(&buf, tr); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	var out ExportedTrace
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.PathMTU != 1400 {
+		t.Errorf("PathMTU = %d, want 1400", out.PathMTU)
+	}
+	if len(out.Hops) != 1 || !out.Hops[0].MTUBlackhole || out.Hops[0].MTU != 1400 {
+		t.Errorf("hop = %+v, want MTU 1400 with MTUBlackhole true", out.Hops)
+	}
+	for _, key := range []string{`"pathMtu":1400`, `"mtuBlackhole":true`} {
+		if !strings.Contains(buf.String(), key) {
+			t.Errorf("JSON output missing %s", key)
+		}
+	}
+}

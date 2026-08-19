@@ -107,7 +107,7 @@ func TestICMPTracer_BuildEchoRequest_IPv6(t *testing.T) {
 	tracer := NewICMPTracer(cfg)
 	target := net.ParseIP("2001:4860:4860::8888")
 
-	msg := tracer.buildEchoRequestForIP(1, 1, target, 0)
+	msg := tracer.buildEchoRequestForIP(1, 1, target, 0, 0)
 
 	if msg.Type != ipv6.ICMPTypeEchoRequest {
 		t.Errorf("expected ICMPv6 Echo Request type, got %v", msg.Type)
@@ -130,7 +130,7 @@ func TestICMPTracer_BuildEchoRequest_IPv4(t *testing.T) {
 	tracer := NewICMPTracer(cfg)
 	target := net.ParseIP("8.8.8.8")
 
-	msg := tracer.buildEchoRequestForIP(1, 1, target, 0)
+	msg := tracer.buildEchoRequestForIP(1, 1, target, 0, 0)
 
 	if msg.Type != ipv4.ICMPTypeEcho {
 		t.Errorf("expected ICMPv4 Echo type, got %v", msg.Type)
@@ -213,7 +213,7 @@ func TestBuildEchoRequest_ECMPVariation(t *testing.T) {
 
 	packets := make(map[string]bool)
 	for flow := 0; flow < 4; flow++ {
-		msg := tracer.buildEchoRequestForIP(5, 0, target, flow)
+		msg := tracer.buildEchoRequestForIP(5, 0, target, flow, 0)
 		data, err := msg.Marshal(nil)
 		if err != nil {
 			t.Fatalf("failed to marshal: %v", err)
@@ -231,7 +231,7 @@ func TestBuildEchoRequest_NoFlowID_Consistent(t *testing.T) {
 	target := net.ParseIP("8.8.8.8")
 
 	// flowID=0 should work normally (no ECMP variation)
-	msg := tracer.buildEchoRequestForIP(1, 0, target, 0)
+	msg := tracer.buildEchoRequestForIP(1, 0, target, 0, 0)
 	body, ok := msg.Body.(*icmp.Echo)
 	if !ok {
 		t.Fatal("expected Echo body")
@@ -258,7 +258,7 @@ func TestICMPTracer_BuildEchoRequest_ProbeSize(t *testing.T) {
 	tracer := NewICMPTracer(cfg)
 	target := net.ParseIP("8.8.8.8")
 
-	msg := tracer.buildEchoRequestForIP(1, 0, target, 0)
+	msg := tracer.buildEchoRequestForIP(1, 0, target, 0, 0)
 	data, err := msg.Marshal(nil)
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)

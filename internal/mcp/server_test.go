@@ -616,3 +616,32 @@ func TestUpdateMCPECMPClassification_NoECMP(t *testing.T) {
 		t.Errorf("expected empty, got %q", stats[1].ECMPClassified)
 	}
 }
+
+func TestFormatHop_MTUBlackhole(t *testing.T) {
+	h := hop.NewHop(3)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	h.MTU = 1400
+	h.MTUBlackhole = true
+
+	var sb strings.Builder
+	formatHop(&sb, h)
+
+	if !strings.Contains(sb.String(), "[MTU: 1400 blackhole]") {
+		t.Errorf("expected blackhole marker in result: %s", sb.String())
+	}
+}
+
+func TestFormatTraceResult_PathMTUFooter(t *testing.T) {
+	tr := hop.NewTraceResult("example.com", "93.184.216.34")
+	tr.ReachedTarget = true
+	tr.PathMTU = 1400
+	h := hop.NewHop(1)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	tr.AddHop(h)
+
+	result := formatTraceResult(tr)
+
+	if !strings.Contains(result, "Path MTU: 1400") {
+		t.Errorf("expected Path MTU footer in result: %s", result)
+	}
+}

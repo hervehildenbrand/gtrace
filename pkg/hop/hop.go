@@ -85,6 +85,7 @@ type Hop struct {
 	Enrichment    Enrichment
 	InterfaceInfo *InterfaceInfo // RFC 5837 interface information (nil if not available)
 	MTU           int            // Discovered MTU at this hop
+	MTUBlackhole  bool           // Hop silently drops oversized packets (no ICMP error)
 	NAT           bool           // NAT detected at this hop
 }
 
@@ -193,6 +194,7 @@ type TraceResult struct {
 	ReachedTarget bool      // Whether the target was reached
 	Protocol      string    // Protocol used (icmp, udp, tcp)
 	Source        string    // Source location (empty for local)
+	PathMTU       int       // Discovered end-to-end path MTU (0 = not discovered)
 	StartTime     time.Time // When the trace started
 	EndTime       time.Time // When the trace completed
 }

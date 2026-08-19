@@ -253,3 +253,17 @@ func TestSimpleRenderer_FormatRTT_FormatsMilliseconds(t *testing.T) {
 		t.Errorf("expected '0.50ms', got %q", result)
 	}
 }
+
+func TestSimpleRenderer_RenderHop_ShowsMTUBlackhole(t *testing.T) {
+	r := NewSimpleRenderer()
+	h := hop.NewHop(3)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 5*time.Millisecond)
+	h.MTU = 1400
+	h.MTUBlackhole = true
+
+	result := r.RenderHop(h)
+
+	if !strings.Contains(result, "[MTU:1400 blackhole]") {
+		t.Errorf("expected [MTU:1400 blackhole] in output, got %q", result)
+	}
+}

@@ -4,12 +4,21 @@ package trace
 
 import "syscall"
 
-// setDontFragment sets the Don't Fragment (DF) bit on an IPv4 socket.
-// On Linux this uses IP_MTU_DISCOVER (10) with IP_PMTUDISC_DO (2).
-func setDontFragment(fd socketFD) error {
-	const (
-		ipMTUDiscover = 10 // IP_MTU_DISCOVER
-		ipPMTUDiscDo  = 2  // IP_PMTUDISC_DO
-	)
-	return syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, ipMTUDiscover, ipPMTUDiscDo)
+// Linux IP-level socket option numbers not exposed by the syscall package.
+const (
+	ipMTUDiscover   = 10 // IP_MTU_DISCOVER
+	ipPMTUDiscProbe = 3  // IP_PMTUDISC_PROBE: DF set, kernel PMTU cache ignored
+	ipv6MTUDiscover = 23 // IPV6_MTU_DISCOVER
+)
+
+// setDontFragmentProbe sets DF while bypassing the kernel PMTU cache so
+// deliberately oversized probes actually leave the host (tracepath-style).
+// IP_PMTUDISC_DO would fail such sends locally once the cache warms.
+func setDontFragmentProbe(fd socketFD) error {
+	return syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, ipMTUDiscover, ipPMTUDiscProbe)
+}
+
+// setDontFragmentV6 is the IPv6 equivalent of setDontFragmentProbe.
+func setDontFragmentV6(fd socketFD) error {
+	return syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, ipv6MTUDiscover, ipPMTUDiscProbe)
 }
