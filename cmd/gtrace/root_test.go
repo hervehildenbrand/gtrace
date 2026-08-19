@@ -974,3 +974,61 @@ func TestSetupCmd_UpgradeRegisteredForReleaseBuild(t *testing.T) {
 		t.Error("upgrade --help should show the upgrade description")
 	}
 }
+
+func TestRootCommand_GraphFlagDefaultsFalse(t *testing.T) {
+	cmd := NewRootCmd("dev")
+
+	f := cmd.Flags().Lookup("graph")
+	if f == nil {
+		t.Fatal("expected --graph flag to be registered")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("expected --graph default false, got %s", f.DefValue)
+	}
+}
+
+func TestRootCommand_GraphAcceptsSingleTarget(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "--graph", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRootCommand_GraphWithMonitorRejected(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "--graph", "--monitor", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error when --graph and --monitor are combined")
+	}
+	if !strings.Contains(err.Error(), "--graph") {
+		t.Errorf("error should mention --graph, got: %v", err)
+	}
+}
+
+func TestRootCommand_GraphWithMultipleTargetsRejected(t *testing.T) {
+	cmd := NewRootCmd("dev")
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"google.com", "cloudflare.com", "--graph", "--dry-run"})
+
+	err := cmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error when --graph is used with multiple targets")
+	}
+	if !strings.Contains(err.Error(), "--graph") {
+		t.Errorf("error should mention --graph, got: %v", err)
+	}
+}
