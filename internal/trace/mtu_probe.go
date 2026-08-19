@@ -190,6 +190,8 @@ func (s *MTUProbeState) done(mtu int) MTUProbeDecision {
 func classifyMTUProbe(pr *probeResult, err error) MTUProbeEvent {
 	if err != nil {
 		if isEMSGSIZE(err) {
+			// ponytail: ReportedMTU left 0 (binary search recovers); query
+			// IP_MTU getsockopt here if EMSGSIZE turns out common in practice.
 			return MTUProbeEvent{Type: MTUEventEMSGSIZE}
 		}
 		return MTUProbeEvent{Type: MTUEventTimeout}
