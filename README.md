@@ -309,9 +309,16 @@ gtrace includes a built-in [MCP](https://modelcontextprotocol.io/) server that e
 | `traceroute` | Full traceroute with ASN, geo, MPLS enrichment | Yes |
 | `mtr` | MTR report with packet loss and latency stats | Yes |
 | `globalping` | Remote traceroute from worldwide probe locations | No |
+| `list_probes` | Discover GlobalPing probe locations (filter by country, city, ASN, network) | No |
+| `ping` | Distributed ICMP/TCP ping via GlobalPing | No |
+| `dns` | Distributed DNS lookup via GlobalPing (all record types, trace mode) | No |
 | `asn_lookup` | ASN info for an IP (org, prefix, country) | No |
 | `geo_lookup` | Geolocation for an IP (city, coords, timezone) | No |
 | `reverse_dns` | Reverse DNS hostname lookup | No |
+
+### Output Formats
+
+Every tool accepts `format: "text"` (default, human-readable) or `format: "json"`, which returns machine-readable data in the MCP result's `structuredContent` field. `traceroute` and `globalping` also accept `view: "graph"` to render the visual path graph (forks, merges, per-source strands) instead of the classic table; `view` is ignored when `format` is `json`.
 
 ### Setup with Claude Code
 
