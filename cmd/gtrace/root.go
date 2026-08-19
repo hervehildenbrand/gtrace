@@ -280,7 +280,9 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	// Advanced diagnostics flags
 	cmd.Flags().BoolVar(&cfg.DetectNAT, "detect-nat", false, "Enable NAT detection via TTL analysis")
 	cmd.Flags().IntVar(&cfg.ECMPFlows, "ecmp-flows", 0, "ECMP flow variations per hop (0=disabled, 8=recommended)")
+	cmd.Flags().BoolVar(&cfg.DiscoverMTU, "mtu", false, "Discover per-hop path MTU (icmp/udp only)")
 	cmd.Flags().BoolVar(&cfg.DiscoverMTU, "discover-mtu", false, "Enable Path MTU Discovery")
+	_ = cmd.Flags().MarkDeprecated("discover-mtu", "use --mtu instead")
 	cmd.Flags().IntVar(&cfg.ProbeSize, "probe-size", 64, "Probe packet size in bytes")
 	cmd.Flags().BoolVarP(&cfg.Decode, "decode", "D", false, "Decode transport headers from ICMP error bodies")
 
@@ -742,6 +744,9 @@ func runLocalTraceSimple(ctx context.Context, cmd *cobra.Command, cfg *Config, t
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "\nTrace complete: %d hops (target not reached)\n",
 			result.TotalHops())
+	}
+	if result.PathMTU > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Path MTU: %d\n", result.PathMTU)
 	}
 
 	return result, nil
