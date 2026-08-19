@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -244,5 +245,26 @@ func TestGeoLookup_APIFallback_Failure(t *testing.T) {
 	// Should return empty result on API failure, not error
 	if !result.IsEmpty() {
 		t.Errorf("expected empty result on API failure, got %+v", result)
+	}
+}
+
+func TestGeoResult_MarshalJSON_LowercaseCamelKeys(t *testing.T) {
+	data, err := json.Marshal(&GeoResult{
+		City:        "Mountain View",
+		Country:     "US",
+		CountryName: "United States",
+		Region:      "California",
+		Latitude:    37.386,
+		Longitude:   -122.0838,
+		Timezone:    "America/Los_Angeles",
+	})
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	for _, key := range []string{`"city":"Mountain View"`, `"country":"US"`, `"countryName":"United States"`, `"region":"California"`, `"latitude":37.386`, `"longitude":-122.0838`, `"timezone":"America/Los_Angeles"`} {
+		if !strings.Contains(string(data), key) {
+			t.Errorf("JSON missing %s:\n%s", key, data)
+		}
 	}
 }
