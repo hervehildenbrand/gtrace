@@ -1,7 +1,9 @@
 package display
 
 import (
+	"bytes"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,5 +203,62 @@ func TestOrderNodes_CrossSourceCycle_Terminates(t *testing.T) {
 
 	if len(order) != len(g.nodes) {
 		t.Fatalf("expected all %d nodes emitted despite cycle, got %d", len(g.nodes), len(order))
+	}
+}
+
+func TestGraphRenderer_EmptyResults_ReturnsError(t *testing.T) {
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render(nil); err == nil {
+		t.Fatal("expected error for empty input")
+	}
+}
+
+func TestGraphRenderer_SingleLinearPath_RendersChain(t *testing.T) {
+	tr := testTrace("", "dns.example", "8.8.8.8", true,
+		[]string{"10.0.0.1"}, []string{"10.0.0.2"}, []string{"8.8.8.8"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{tr}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"Path graph to dns.example (8.8.8.8), 1 source",
+		"○  Local",
+		"●  10.0.0.1",
+		"●  10.0.0.2",
+		"◎  8.8.8.8",
+		"10.0ms",
+		"target reached (1/1 sources)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestGraphRenderer_ECMPHop_ForkAndMergeGlyphs(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", true,
+		[]string{"10.0.0.1"}, []string{"172.16.0.1", "172.16.0.2"}, []string{"9.9.9.9"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{tr}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "├─╮") {
+		t.Errorf("expected fork connector ├─╮ in output:\n%s", out)
+	}
+	if !strings.Contains(out, "├─╯") {
+		t.Errorf("expected merge connector ├─╯ in output:\n%s", out)
+	}
+	if !strings.Contains(out, "● │  172.16.0.1") || !strings.Contains(out, "│ ●  172.16.0.2") {
+		t.Errorf("expected sibling rows in their own lanes:\n%s", out)
 	}
 }

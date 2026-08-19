@@ -2,10 +2,14 @@ package display
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
+	"golang.org/x/term"
 )
 
 // graphNode is one router (or synthetic source / timeout placeholder) in the
@@ -245,4 +249,328 @@ func orderNodes(g *pathGraph) []string {
 		}
 	}
 	return order
+}
+
+// GraphRenderer renders traceroute paths as a terminal Unicode DAG,
+// git-log --graph style: one row per router, lane glyphs on the left.
+type GraphRenderer struct {
+	writer    io.Writer
+	noColor   bool
+	termWidth int
+}
+
+// NewGraphRenderer creates a renderer with terminal width detection.
+func NewGraphRenderer(w io.Writer, noColor bool) *GraphRenderer {
+	width := 80
+	if f, ok := w.(*os.File); ok {
+		if tw, _, err := term.GetSize(int(f.Fd())); err == nil && tw > 0 {
+			width = tw
+		}
+	}
+	return &GraphRenderer{writer: w, noColor: noColor, termWidth: width}
+}
+
+// laneCell is one 2-column glyph cell of a rendered row.
+type laneCell struct {
+	glyph string
+	src   int // owning source index for coloring, -1 = neutral
+}
+
+// graphRow is a laid-out output row: lane cells plus optional node text.
+type graphRow struct {
+	cells []laneCell
+	text  string
+	node  *graphNode // nil for connector rows
+}
+
+// lane tracks an edge in flight toward its next node.
+type lane struct {
+	expect string // node key this lane flows toward; "" = free
+	src    int    // owning source index, -1 = shared
+}
+
+func singleSource(sources map[int]bool) int {
+	if len(sources) == 1 {
+		for s := range sources {
+			return s
+		}
+	}
+	return -1
+}
+
+// layoutRows walks the ordered nodes and produces rows with lane glyphs.
+// Merge connectors precede a node's row; fork connectors follow it.
+func layoutRows(g *pathGraph, order []string, nSources int) []graphRow {
+	out := map[string][]string{}
+	for e := range g.edges {
+		out[e[0]] = append(out[e[0]], e[1])
+	}
+	pos := make(map[string]int, len(order))
+	for i, k := range order {
+		pos[k] = i
+	}
+	for k := range out {
+		ts := out[k]
+		sort.Slice(ts, func(i, j int) bool { return pos[ts[i]] < pos[ts[j]] })
+	}
+
+	var lanes []lane
+	var rows []graphRow
+
+	snapshot := func() []laneCell {
+		cs := make([]laneCell, len(lanes))
+		for i, l := range lanes {
+			if l.expect == "" {
+				cs[i] = laneCell{"  ", -1}
+			} else {
+				cs[i] = laneCell{"│ ", l.src}
+			}
+		}
+		return cs
+	}
+
+	for _, k := range order {
+		n := g.nodes[k]
+
+		var in []int
+		for i := range lanes {
+			if lanes[i].expect == k {
+				in = append(in, i)
+			}
+		}
+
+		var nodeLane int
+		if len(in) == 0 {
+			// source node (or stall-broken orphan): open a fresh lane
+			nodeLane = len(lanes)
+			for i := range lanes {
+				if lanes[i].expect == "" {
+					nodeLane = i
+					break
+				}
+			}
+			if nodeLane == len(lanes) {
+				lanes = append(lanes, lane{})
+			}
+			lanes[nodeLane] = lane{expect: k, src: singleSource(n.sources)}
+		} else {
+			nodeLane = in[0]
+		}
+
+		// merge connector: all other incoming lanes close into nodeLane
+		if len(in) > 1 {
+			cs := snapshot()
+			last := in[len(in)-1]
+			closing := map[int]bool{}
+			for _, i := range in[1:] {
+				closing[i] = true
+			}
+			for i := nodeLane; i <= last; i++ {
+				switch {
+				case i == nodeLane:
+					cs[i] = laneCell{"├─", lanes[i].src}
+				case i == last:
+					cs[i] = laneCell{"╯ ", lanes[i].src}
+				case closing[i]:
+					cs[i] = laneCell{"┴─", lanes[i].src}
+				case lanes[i].expect == "":
+					cs[i] = laneCell{"──", -1}
+				default:
+					cs[i] = laneCell{"┼─", lanes[i].src}
+				}
+			}
+			rows = append(rows, graphRow{cells: cs})
+			for _, i := range in[1:] {
+				lanes[i] = lane{}
+			}
+			// compact freed trailing lanes so the node row hugs its glyphs
+			for len(lanes) > 0 && lanes[len(lanes)-1].expect == "" {
+				lanes = lanes[:len(lanes)-1]
+			}
+		}
+
+		// node row
+		cs := snapshot()
+		marker := "● "
+		switch {
+		case n.isSource:
+			marker = "○ "
+		case n.isTarget:
+			marker = "◎ "
+		case n.isTimeout:
+			marker = "* "
+		case len(n.sources) > 1 && nSources > 1:
+			marker = "◉ "
+		}
+		cs[nodeLane] = laneCell{marker, singleSource(n.sources)}
+		rows = append(rows, graphRow{cells: cs, text: nodeText(n, g, nSources), node: n})
+
+		// outgoing edges: first continues in nodeLane, others fork right
+		targets := out[k]
+		if len(targets) == 0 {
+			lanes[nodeLane] = lane{}
+		} else {
+			edgeSrc := func(to string) int {
+				return singleSource(g.edges[[2]string{k, to}].sources)
+			}
+			lanes[nodeLane] = lane{expect: targets[0], src: edgeSrc(targets[0])}
+			if len(targets) > 1 {
+				var newLanes []int
+				for _, t := range targets[1:] {
+					li := -1
+					for i := nodeLane + 1; i < len(lanes); i++ {
+						if lanes[i].expect == "" {
+							li = i
+							break
+						}
+					}
+					if li == -1 {
+						lanes = append(lanes, lane{})
+						li = len(lanes) - 1
+					}
+					lanes[li] = lane{expect: t, src: edgeSrc(t)}
+					newLanes = append(newLanes, li)
+				}
+				cs := snapshot()
+				last := newLanes[len(newLanes)-1]
+				opening := map[int]bool{}
+				for _, i := range newLanes {
+					opening[i] = true
+				}
+				for i := nodeLane; i <= last; i++ {
+					switch {
+					case i == nodeLane:
+						cs[i] = laneCell{"├─", lanes[i].src}
+					case i == last:
+						cs[i] = laneCell{"╮ ", lanes[i].src}
+					case opening[i]:
+						cs[i] = laneCell{"┬─", lanes[i].src}
+					case lanes[i].expect == "":
+						cs[i] = laneCell{"──", -1}
+					default:
+						cs[i] = laneCell{"┼─", lanes[i].src}
+					}
+				}
+				rows = append(rows, graphRow{cells: cs})
+			}
+		}
+
+		// drop trailing free lanes
+		for len(lanes) > 0 && lanes[len(lanes)-1].expect == "" {
+			lanes = lanes[:len(lanes)-1]
+		}
+	}
+
+	return rows
+}
+
+// nodeText formats the info column for a node row.
+func nodeText(n *graphNode, g *pathGraph, nSources int) string {
+	if n.isSource {
+		return n.label
+	}
+	if n.isTimeout {
+		return "(no response)"
+	}
+	parts := []string{n.label}
+	e := n.enrich
+	if e.Hostname != "" && e.Hostname != n.label {
+		parts = append(parts, e.Hostname)
+	}
+	if e.ASN > 0 {
+		asn := fmt.Sprintf("AS%d", e.ASN)
+		if e.ASOrg != "" {
+			asn += " " + e.ASOrg
+		}
+		parts = append(parts, asn)
+	} else if e.ASOrg != "" {
+		parts = append(parts, e.ASOrg)
+	}
+	if e.City != "" || e.Country != "" {
+		loc := e.City
+		if e.Country != "" {
+			if loc != "" {
+				loc += ","
+			}
+			loc += e.Country
+		}
+		parts = append(parts, loc)
+	}
+	if n.rtt > 0 {
+		parts = append(parts, formatRTT(n.rtt))
+	}
+	if n.loss > 0 {
+		parts = append(parts, fmt.Sprintf("%.0f%% loss", n.loss))
+	}
+	if n.hasMPLS {
+		parts = append(parts, "[MPLS]")
+	}
+	if n.nat {
+		parts = append(parts, "[NAT]")
+	}
+	if e.IX != "" {
+		parts = append(parts, "[IX "+e.IX+"]")
+	}
+	if len(n.sources) > 1 && nSources > 1 {
+		idxs := make([]int, 0, len(n.sources))
+		for s := range n.sources {
+			idxs = append(idxs, s)
+		}
+		sort.Ints(idxs)
+		labels := make([]string, len(idxs))
+		for i, s := range idxs {
+			labels[i] = g.sourceLabels[s]
+		}
+		parts = append(parts, "⇐ "+strings.Join(labels, " + "))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// Render draws a DAG for one or more trace results.
+func (r *GraphRenderer) Render(results []*hop.TraceResult) error {
+	if len(results) == 0 {
+		return fmt.Errorf("no trace results to render")
+	}
+
+	g := buildGraph(results)
+	order := orderNodes(g)
+	rows := layoutRows(g, order, len(results))
+
+	target := results[0].Target
+	targetIP := results[0].TargetIP
+	srcWord := "sources"
+	if len(results) == 1 {
+		srcWord = "source"
+	}
+	if targetIP != "" && targetIP != target {
+		fmt.Fprintf(r.writer, "Path graph to %s (%s), %d %s\n\n", target, targetIP, len(results), srcWord)
+	} else {
+		fmt.Fprintf(r.writer, "Path graph to %s, %d %s\n\n", target, len(results), srcWord)
+	}
+
+	for _, row := range rows {
+		var b strings.Builder
+		for _, c := range row.cells {
+			b.WriteString(c.glyph)
+		}
+		line := b.String()
+		if row.text != "" {
+			line += " " + row.text
+		}
+		fmt.Fprintln(r.writer, strings.TrimRight(line, " "))
+	}
+
+	reached := 0
+	for _, tr := range results {
+		if tr.ReachedTarget {
+			reached++
+		}
+	}
+	if reached > 0 {
+		fmt.Fprintf(r.writer, "\ntarget reached (%d/%d sources)\n", reached, len(results))
+	} else {
+		fmt.Fprintf(r.writer, "\ntarget not reached\n")
+	}
+
+	return nil
 }
