@@ -15,11 +15,6 @@ type asBlock struct {
 	private bool
 }
 
-// sameNet reports whether a hop classified as (asn, private) continues b.
-func (b asBlock) sameNet(asn uint32, private bool) bool {
-	return b.asn == asn && b.private == private
-}
-
 // asPath aggregates a trace's hops into consecutive AS blocks. Timeout hops
 // carry no AS information and are skipped without splitting a run.
 func asPath(tr *hop.TraceResult) []asBlock {
@@ -34,7 +29,7 @@ func asPath(tr *hop.TraceResult) []asBlock {
 		}
 		asn := h.Enrichment.ASN
 		private := asn == 0 && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast())
-		if n := len(blocks); n > 0 && blocks[n-1].sameNet(asn, private) {
+		if n := len(blocks); n > 0 && blocks[n-1].asn == asn && blocks[n-1].private == private {
 			blocks[n-1].count++
 			if blocks[n-1].org == "" {
 				blocks[n-1].org = h.Enrichment.ASOrg
@@ -102,10 +97,14 @@ func (r *GraphRenderer) renderASOverview(results []*hop.TraceResult) {
 		target = results[0].Target
 	}
 
+	blocksBySource := make([][]asBlock, len(results))
+	for i, tr := range results {
+		blocksBySource[i] = asPath(tr)
+	}
+
 	build := func(withOrg bool) []string {
 		rows := make([]string, len(results))
-		for i, tr := range results {
-			blocks := asPath(tr)
+		for i, blocks := range blocksBySource {
 			if len(blocks) == 0 {
 				rows[i] = fmt.Sprintf("%-*s ○ (no data)", nameW, names[i])
 				continue
@@ -143,7 +142,7 @@ func (r *GraphRenderer) renderASOverview(results []*hop.TraceResult) {
 
 	var reached []int
 	for i, tr := range results {
-		if tr.ReachedTarget && len(asPath(tr)) > 0 {
+		if tr.ReachedTarget && len(blocksBySource[i]) > 0 {
 			reached = append(reached, i)
 		}
 	}
