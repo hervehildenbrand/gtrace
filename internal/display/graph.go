@@ -6,7 +6,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
@@ -20,7 +19,8 @@ type graphNode struct {
 	key       string
 	label     string // IP string, source label, or "*" for timeouts
 	enrich    hop.Enrichment
-	rtt       time.Duration
+	ttl       int      // first-seen hop number (display; depth holds the layout max)
+	rtts      []string // per-probe RTTs ("*" for timeouts), traceroute-style
 	loss      float64
 	hasMPLS   bool
 	nat       bool
@@ -70,20 +70,20 @@ func allTimeout(h *hop.Hop) bool {
 	return true
 }
 
-// ipAvgRTT averages the RTTs of the probes answering from ip.
-func ipAvgRTT(h *hop.Hop, ip string) time.Duration {
-	var total time.Duration
-	var count int
+// probeRTTs lists the hop's probe RTTs for ip, traceroute-style. Timeouts
+// show as "*" only on single-IP hops — with ECMP siblings a timeout cannot
+// be attributed to one IP.
+func probeRTTs(h *hop.Hop, ip string, ecmp bool) []string {
+	var out []string
 	for _, p := range h.Probes {
-		if !p.Timeout && p.IP != nil && p.IP.String() == ip {
-			total += p.RTT
-			count++
+		switch {
+		case p.Timeout && !ecmp:
+			out = append(out, "*")
+		case !p.Timeout && p.IP != nil && p.IP.String() == ip:
+			out = append(out, formatRTT(p.RTT))
 		}
 	}
-	if count == 0 {
-		return 0
-	}
-	return total / time.Duration(count)
+	return out
 }
 
 // flowIPs maps FlowID -> responding IP for hops probed with --ecmp-flows.
@@ -209,7 +209,7 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 					run++
 				}
 				key := fmt.Sprintf("t:%d:%d", i, h.TTL)
-				g.touchNode(&graphNode{key: key, label: "*", depth: hops[hi+run-1].TTL, count: run, isTimeout: true}, i)
+				g.touchNode(&graphNode{key: key, label: "*", ttl: h.TTL, depth: hops[hi+run-1].TTL, count: run, isTimeout: true}, i)
 				hi += run - 1
 				cur = []string{key}
 			} else {
@@ -224,7 +224,8 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 						key:     key,
 						label:   ip,
 						enrich:  h.Enrichment,
-						rtt:     ipAvgRTT(h, ip),
+						ttl:     h.TTL,
+						rtts:    probeRTTs(h, ip, ecmp),
 						depth:   h.TTL,
 						hasMPLS: len(h.MPLS) > 0,
 						nat:     h.NAT,
@@ -566,18 +567,19 @@ func layoutRows(g *pathGraph, order []string, nSources int) []graphRow {
 	return rows
 }
 
-// nodeText formats the info column for a node row.
+// nodeText formats the info column for a node row, prefixed with the
+// hop number (blank for source rows, first-seen TTL elsewhere).
 func nodeText(n *graphNode, g *pathGraph, nSources int) string {
 	if n.isSource {
-		return n.label
+		return "    " + n.label
 	}
 	if n.isTimeout {
 		if n.count > 1 {
-			return fmt.Sprintf("(no response ×%d)", n.count)
+			return fmt.Sprintf("%2d  (no response ×%d)", n.ttl, n.count)
 		}
-		return "(no response)"
+		return fmt.Sprintf("%2d  (no response)", n.ttl)
 	}
-	parts := []string{n.label}
+	parts := []string{fmt.Sprintf("%2d  %s", n.ttl, n.label)}
 	e := n.enrich
 	if e.Hostname != "" && e.Hostname != n.label {
 		parts = append(parts, e.Hostname)
@@ -601,8 +603,8 @@ func nodeText(n *graphNode, g *pathGraph, nSources int) string {
 		}
 		parts = append(parts, loc)
 	}
-	if n.rtt > 0 {
-		parts = append(parts, formatRTT(n.rtt))
+	if len(n.rtts) > 0 {
+		parts = append(parts, strings.Join(n.rtts, " "))
 	}
 	if n.loss > 0 {
 		parts = append(parts, fmt.Sprintf("%.0f%% loss", n.loss))

@@ -89,11 +89,11 @@ func TestBuildGraph_ECMPHop_PerIPRTT(t *testing.T) {
 
 	g := buildGraph([]*hop.TraceResult{tr})
 
-	if got := g.nodes["172.16.0.1"].rtt; got != 10*time.Millisecond {
-		t.Errorf("expected per-IP RTT 10ms, got %v", got)
+	if got := g.nodes["172.16.0.1"].rtts; len(got) != 1 || got[0] != "10.0ms" {
+		t.Errorf("expected per-IP RTT list [10.0ms], got %v", got)
 	}
-	if got := g.nodes["172.16.0.2"].rtt; got != 30*time.Millisecond {
-		t.Errorf("expected per-IP RTT 30ms, got %v", got)
+	if got := g.nodes["172.16.0.2"].rtts; len(got) != 1 || got[0] != "30.0ms" {
+		t.Errorf("expected per-IP RTT list [30.0ms], got %v", got)
 	}
 }
 
@@ -228,10 +228,10 @@ func TestGraphRenderer_SingleLinearPath_RendersChain(t *testing.T) {
 
 	for _, want := range []string{
 		"Path graph to dns.example (8.8.8.8), 1 source",
-		"○  Local",
-		"●  10.0.0.1",
-		"●  10.0.0.2",
-		"◎  8.8.8.8",
+		"○      Local",
+		"●   1  10.0.0.1",
+		"●   2  10.0.0.2",
+		"◎   3  8.8.8.8",
 		"10.0ms",
 		"target reached (1/1 sources)",
 	} {
@@ -258,7 +258,7 @@ func TestGraphRenderer_ECMPHop_ForkAndMergeGlyphs(t *testing.T) {
 	if !strings.Contains(out, "├─╯") {
 		t.Errorf("expected merge connector ├─╯ in output:\n%s", out)
 	}
-	if !strings.Contains(out, "● │  172.16.0.1") || !strings.Contains(out, "│ ●  172.16.0.2") {
+	if !strings.Contains(out, "● │   2  172.16.0.1") || !strings.Contains(out, "│ ●   2  172.16.0.2") {
 		t.Errorf("expected sibling rows in their own lanes:\n%s", out)
 	}
 }
@@ -276,7 +276,7 @@ func TestGraphRenderer_TwoSources_ConvergenceMarked(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, "◉  8.8.4.1") {
+	if !strings.Contains(out, "◉   2  8.8.4.1") {
 		t.Errorf("expected convergence marker ◉ for shared node:\n%s", out)
 	}
 	if !strings.Contains(out, "⇐ Paris + Tokyo") {
@@ -303,13 +303,13 @@ func TestGraphRenderer_ConvergeThenDiverge_ReSplitsLanes(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, "◉  10.0.0.9") {
+	if !strings.Contains(out, "◉   1  10.0.0.9") {
 		t.Errorf("expected convergence at shared first hop:\n%s", out)
 	}
 	if !strings.Contains(out, "├─╮") {
 		t.Errorf("expected fork connector after convergence (divergence):\n%s", out)
 	}
-	if !strings.Contains(out, "● │  2.2.2.1") || !strings.Contains(out, "●  3.3.3.1") {
+	if !strings.Contains(out, "● │   2  2.2.2.1") || !strings.Contains(out, "●   2  3.3.3.1") {
 		t.Errorf("expected diverged nodes in separate lanes:\n%s", out)
 	}
 }
@@ -344,7 +344,7 @@ func TestGraphRenderer_TimeoutHop_Star(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, "*  (no response)") {
+	if !strings.Contains(out, "*   2  (no response)") {
 		t.Errorf("expected timeout star row:\n%s", out)
 	}
 }
@@ -457,7 +457,7 @@ func TestGraphRenderer_TwoSources_StrandsReadTopToBottom(t *testing.T) {
 
 	// Source A's full path renders as adjacent rows, then B's, then the merge.
 	for _, chunk := range []string{
-		"○  A\n●  10.1.0.1  10.0ms\n●  10.1.0.2  10.0ms\n│ ○  B\n│ ●  10.2.0.1  10.0ms\n│ ●  10.2.0.2  10.0ms\n├─╯\n◎  8.8.8.8",
+		"○      A\n●   1  10.1.0.1  10.0ms\n●   2  10.1.0.2  10.0ms\n│ ○      B\n│ ●   1  10.2.0.1  10.0ms\n│ ●   2  10.2.0.2  10.0ms\n├─╯\n◎   3  8.8.8.8",
 	} {
 		if !strings.Contains(out, chunk) {
 			t.Errorf("output missing contiguous strand block:\n--- want ---\n%s\n--- got ---\n%s", chunk, out)
@@ -534,8 +534,30 @@ func TestGraphRenderer_FlowStrands_RenderContiguously(t *testing.T) {
 	out := buf.String()
 
 	// flow 1's two hops adjacent, then flow 2's two hops, then the merge
-	want := "● │  10.0.1.1  10.0ms\n● │  10.0.2.1  10.0ms\n│ ●  10.0.1.2  10.0ms\n│ ●  10.0.2.2  10.0ms\n├─╯\n◎  9.9.9.9"
+	want := "● │   2  10.0.1.1  10.0ms\n● │   3  10.0.2.1  10.0ms\n│ ●   2  10.0.1.2  10.0ms\n│ ●   3  10.0.2.2  10.0ms\n├─╯\n◎   4  9.9.9.9"
 	if !strings.Contains(out, want) {
 		t.Errorf("expected parallel flow strands:\n--- want ---\n%s\n--- got ---\n%s", want, out)
+	}
+}
+
+func TestBuildGraph_ProbeRTTList_IncludesStars(t *testing.T) {
+	tr := hop.NewTraceResult("t", "9.9.9.9")
+	h := hop.NewHop(1)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 10*time.Millisecond)
+	h.AddProbe(net.ParseIP("10.0.0.1"), 20*time.Millisecond)
+	h.AddTimeout()
+	tr.AddHop(h)
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	got := g.nodes["10.0.0.1"].rtts
+	want := []string{"10.0ms", "20.0ms", "*"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
 	}
 }
