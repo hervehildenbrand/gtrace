@@ -32,39 +32,33 @@ type graphNode struct {
 	isTimeout bool
 }
 
-type graphEdge struct {
-	sources map[int]bool
-}
-
 // pathGraph is the merged DAG built from one or more trace results.
+// Edge values are the source indices using that edge.
 type pathGraph struct {
 	nodes        map[string]*graphNode
-	edges        map[[2]string]*graphEdge
+	edges        map[[2]string]map[int]bool
 	sourceLabels []string
 }
 
-func (g *pathGraph) touchNode(n *graphNode, source int) *graphNode {
+func (g *pathGraph) touchNode(n *graphNode, source int) {
 	existing := g.nodes[n.key]
 	if existing == nil {
 		n.sources = map[int]bool{source: true}
 		g.nodes[n.key] = n
-		return n
+		return
 	}
 	existing.sources[source] = true
 	if n.depth > existing.depth {
 		existing.depth = n.depth
 	}
-	return existing
 }
 
 func (g *pathGraph) addEdge(from, to string, source int) {
 	key := [2]string{from, to}
-	e := g.edges[key]
-	if e == nil {
-		e = &graphEdge{sources: map[int]bool{}}
-		g.edges[key] = e
+	if g.edges[key] == nil {
+		g.edges[key] = map[int]bool{}
 	}
-	e.sources[source] = true
+	g.edges[key][source] = true
 }
 
 func allTimeout(h *hop.Hop) bool {
@@ -116,7 +110,7 @@ func distinctIPs(h *hop.Hop) []string {
 func buildGraph(results []*hop.TraceResult) *pathGraph {
 	g := &pathGraph{
 		nodes:        map[string]*graphNode{},
-		edges:        map[[2]string]*graphEdge{},
+		edges:        map[[2]string]map[int]bool{},
 		sourceLabels: make([]string, len(results)),
 	}
 
@@ -420,7 +414,7 @@ func layoutRows(g *pathGraph, order []string, nSources int) []graphRow {
 			lanes[nodeLane] = lane{}
 		} else {
 			edgeSrc := func(to string) int {
-				return singleSource(g.edges[[2]string{k, to}].sources)
+				return singleSource(g.edges[[2]string{k, to}])
 			}
 			lanes[nodeLane] = lane{expect: targets[0], src: edgeSrc(targets[0])}
 			if len(targets) > 1 {
