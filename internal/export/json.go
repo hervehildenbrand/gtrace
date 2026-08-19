@@ -16,6 +16,7 @@ type ExportedTrace struct {
 	Protocol      string        `json:"protocol,omitempty"`
 	Source        string        `json:"source,omitempty"`
 	ReachedTarget bool          `json:"reachedTarget"`
+	PathMTU       int           `json:"pathMtu,omitempty"`
 	StartTime     time.Time     `json:"startTime,omitempty"`
 	EndTime       time.Time     `json:"endTime,omitempty"`
 	Hops          []ExportedHop `json:"hops"`
@@ -23,28 +24,29 @@ type ExportedTrace struct {
 
 // ExportedHop is the JSON representation of a single hop.
 type ExportedHop struct {
-	TTL         int             `json:"ttl"`
-	IP          string          `json:"ip,omitempty"`
-	Hostname    string          `json:"hostname,omitempty"`
-	ASN         uint32          `json:"asn,omitempty"`
-	ASOrg       string          `json:"asOrg,omitempty"`
-	Country     string          `json:"country,omitempty"`
-	City        string          `json:"city,omitempty"`
-	Probes      []ExportedProbe `json:"probes"`
-	MPLS        []ExportedMPLS  `json:"mpls,omitempty"`
-	AvgRTT      float64         `json:"avgRtt"`     // in ms
-	LossPercent float64         `json:"lossPercent"`
-	NAT         bool            `json:"nat,omitempty"`
-	MTU         int             `json:"mtu,omitempty"`
-	ICMPCode    string          `json:"icmpCode,omitempty"` // e.g. "port_unreachable"
+	TTL          int             `json:"ttl"`
+	IP           string          `json:"ip,omitempty"`
+	Hostname     string          `json:"hostname,omitempty"`
+	ASN          uint32          `json:"asn,omitempty"`
+	ASOrg        string          `json:"asOrg,omitempty"`
+	Country      string          `json:"country,omitempty"`
+	City         string          `json:"city,omitempty"`
+	Probes       []ExportedProbe `json:"probes"`
+	MPLS         []ExportedMPLS  `json:"mpls,omitempty"`
+	AvgRTT       float64         `json:"avgRtt"` // in ms
+	LossPercent  float64         `json:"lossPercent"`
+	NAT          bool            `json:"nat,omitempty"`
+	MTU          int             `json:"mtu,omitempty"`
+	MTUBlackhole bool            `json:"mtuBlackhole,omitempty"`
+	ICMPCode     string          `json:"icmpCode,omitempty"` // e.g. "port_unreachable"
 }
 
 // ExportedProbe is the JSON representation of a single probe.
 type ExportedProbe struct {
-	IP      string                  `json:"ip,omitempty"`
-	RTT     float64                 `json:"rtt,omitempty"` // in ms
-	Timeout bool                    `json:"timeout,omitempty"`
-	Decode  *ExportedTransportInfo  `json:"decode,omitempty"`
+	IP      string                 `json:"ip,omitempty"`
+	RTT     float64                `json:"rtt,omitempty"` // in ms
+	Timeout bool                   `json:"timeout,omitempty"`
+	Decode  *ExportedTransportInfo `json:"decode,omitempty"`
 }
 
 // ExportedTransportInfo is the JSON representation of decoded transport header info.
@@ -109,6 +111,7 @@ func (e *JSONExporter) convert(tr *hop.TraceResult) *ExportedTrace {
 		Protocol:      tr.Protocol,
 		Source:        tr.Source,
 		ReachedTarget: tr.ReachedTarget,
+		PathMTU:       tr.PathMTU,
 		StartTime:     tr.StartTime,
 		EndTime:       tr.EndTime,
 		Hops:          make([]ExportedHop, 0, len(tr.Hops)),
@@ -129,19 +132,20 @@ func (e *JSONExporter) convertHop(h *hop.Hop) ExportedHop {
 	}
 
 	exported := ExportedHop{
-		TTL:         h.TTL,
-		IP:          primaryIP,
-		Hostname:    h.Enrichment.Hostname,
-		ASN:         h.Enrichment.ASN,
-		ASOrg:       h.Enrichment.ASOrg,
-		Country:     h.Enrichment.Country,
-		City:        h.Enrichment.City,
-		Probes:      make([]ExportedProbe, 0, len(h.Probes)),
-		AvgRTT:      float64(h.AvgRTT()) / float64(time.Millisecond),
-		LossPercent: h.LossPercent(),
-		NAT:         h.NAT,
-		MTU:         h.MTU,
-		ICMPCode:    icmpCodeForExport(h),
+		TTL:          h.TTL,
+		IP:           primaryIP,
+		Hostname:     h.Enrichment.Hostname,
+		ASN:          h.Enrichment.ASN,
+		ASOrg:        h.Enrichment.ASOrg,
+		Country:      h.Enrichment.Country,
+		City:         h.Enrichment.City,
+		Probes:       make([]ExportedProbe, 0, len(h.Probes)),
+		AvgRTT:       float64(h.AvgRTT()) / float64(time.Millisecond),
+		LossPercent:  h.LossPercent(),
+		NAT:          h.NAT,
+		MTU:          h.MTU,
+		MTUBlackhole: h.MTUBlackhole,
+		ICMPCode:     icmpCodeForExport(h),
 	}
 
 	for _, p := range h.Probes {
