@@ -2,6 +2,7 @@ package display
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/hervehildenbrand/gtrace/pkg/hop"
@@ -182,4 +183,66 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 	}
 
 	return g
+}
+
+// orderNodes returns the node keys in render order: Kahn's topological sort
+// with the ready set kept sorted by (depth, key) for determinism. Two sources
+// can traverse a pair of routers in opposite orders, creating a cross-source
+// cycle that stalls Kahn — the stall-breaker then force-emits the shallowest
+// remaining node, dropping its unsatisfied in-edges.
+func orderNodes(g *pathGraph) []string {
+	indeg := make(map[string]int, len(g.nodes))
+	out := map[string][]string{}
+	for k := range g.nodes {
+		indeg[k] = 0
+	}
+	for e := range g.edges {
+		out[e[0]] = append(out[e[0]], e[1])
+		indeg[e[1]]++
+	}
+
+	before := func(a, b string) bool {
+		na, nb := g.nodes[a], g.nodes[b]
+		if na.depth != nb.depth {
+			return na.depth < nb.depth
+		}
+		return a < b
+	}
+
+	var ready []string
+	for k, d := range indeg {
+		if d == 0 {
+			ready = append(ready, k)
+		}
+	}
+
+	order := make([]string, 0, len(g.nodes))
+	emitted := make(map[string]bool, len(g.nodes))
+	for len(order) < len(g.nodes) {
+		if len(ready) == 0 {
+			// stall-breaker: pick the shallowest unemitted node
+			pick := ""
+			for k := range g.nodes {
+				if !emitted[k] && (pick == "" || before(k, pick)) {
+					pick = k
+				}
+			}
+			ready = append(ready, pick)
+		}
+		sort.Slice(ready, func(i, j int) bool { return before(ready[i], ready[j]) })
+		k := ready[0]
+		ready = ready[1:]
+		if emitted[k] {
+			continue
+		}
+		emitted[k] = true
+		order = append(order, k)
+		for _, next := range out[k] {
+			indeg[next]--
+			if indeg[next] == 0 && !emitted[next] {
+				ready = append(ready, next)
+			}
+		}
+	}
+	return order
 }

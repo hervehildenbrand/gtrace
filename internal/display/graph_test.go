@@ -158,3 +158,48 @@ func TestBuildGraph_IntermediateTimeout_StarNode(t *testing.T) {
 		t.Error("expected timeout node chained between neighbors")
 	}
 }
+
+func TestOrderNodes_TopologicalDepthOrder(t *testing.T) {
+	a := testTrace("A", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"8.8.4.1"}, []string{"8.8.8.8"})
+	b := testTrace("B", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"10.2.0.2"}, []string{"8.8.4.1"}, []string{"8.8.8.8"})
+	g := buildGraph([]*hop.TraceResult{a, b})
+
+	order := orderNodes(g)
+
+	if len(order) != len(g.nodes) {
+		t.Fatalf("expected %d nodes in order, got %d", len(g.nodes), len(order))
+	}
+	pos := map[string]int{}
+	for i, k := range order {
+		if _, dup := pos[k]; dup {
+			t.Fatalf("node %s emitted twice", k)
+		}
+		pos[k] = i
+	}
+	for e := range g.edges {
+		if pos[e[0]] >= pos[e[1]] {
+			t.Errorf("edge %s -> %s violates topological order", e[0], e[1])
+		}
+	}
+	// sources (depth 0) come first, in index order
+	if order[0] != "src:0" || order[1] != "src:1" {
+		t.Errorf("expected source nodes first, got %v", order[:2])
+	}
+}
+
+func TestOrderNodes_CrossSourceCycle_Terminates(t *testing.T) {
+	// Source A visits X then Y; source B visits Y then X: X->Y and Y->X.
+	a := testTrace("A", "t", "9.9.9.9", false,
+		[]string{"10.0.0.1"}, []string{"10.0.0.2"})
+	b := testTrace("B", "t", "9.9.9.9", false,
+		[]string{"10.0.0.2"}, []string{"10.0.0.1"})
+	g := buildGraph([]*hop.TraceResult{a, b})
+
+	order := orderNodes(g)
+
+	if len(order) != len(g.nodes) {
+		t.Fatalf("expected all %d nodes emitted despite cycle, got %d", len(g.nodes), len(order))
+	}
+}
