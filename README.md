@@ -37,7 +37,7 @@ Advanced network path analysis tool combining local traceroute with GlobalPing's
 - **ECMP Detection**: Passive detection of load-balanced paths with multiple IPs per hop
 - **Active ECMP Probing**: Paris traceroute-style flow variation to actively discover ECMP paths
 - **NAT Detection**: Identify NAT devices along the path via response TTL analysis
-- **Path MTU Discovery**: Discover per-hop MTU using Don't Fragment bit and ICMP feedback
+- **Path MTU Discovery**: Active per-hop MTU discovery (tracepath-style) with PMTUD black-hole detection
 - **Rich Enrichment**: ASN lookup, reverse DNS, geolocation, IX detection
 - **MTR Mode**: Continuous monitoring with real-time statistics including latency jitter (StdDev)
 - **GlobalPing Integration**: Run traces from 500+ global probe locations
@@ -98,8 +98,8 @@ sudo gtrace example.com --simple --protocol tcp --port 443
 # NAT detection
 sudo gtrace 8.8.8.8 --simple --detect-nat
 
-# Path MTU discovery
-sudo gtrace 8.8.8.8 --simple --discover-mtu --probe-size 1500
+# Path MTU discovery (per-hop, with black-hole detection)
+sudo gtrace mtu 8.8.8.8
 
 # MTR-style continuous monitoring
 sudo gtrace 8.8.8.8
@@ -143,8 +143,10 @@ sudo gtrace -6 google.com --compare --from Paris
 |------|-------------|---------|
 | `--detect-nat` | Enable NAT detection via TTL analysis | false |
 | `--ecmp-flows` | ECMP flow variations per hop (0=disabled) | 0 |
-| `--discover-mtu` | Enable Path MTU Discovery | false |
+| `--mtu` | Active per-hop Path MTU Discovery with black-hole detection (icmp/udp) | false |
 | `--probe-size` | Probe packet size in bytes | 64 |
+
+`--discover-mtu` remains as a deprecated alias for `--mtu`.
 
 ### MTR Mode
 
@@ -239,19 +241,32 @@ NAT devices are identified by TTL anomalies in ICMP responses:
 ### Path MTU Discovery
 
 ```bash
-sudo gtrace 8.8.8.8 --simple --discover-mtu --probe-size 1500 --protocol udp
+sudo gtrace mtu 8.8.8.8              # dedicated subcommand
+sudo gtrace 8.8.8.8 --simple --mtu   # or as a flag on a normal trace
 ```
 
-Discovers the MTU along the path using the Don't Fragment bit:
+Actively discovers each hop's MTU (tracepath-style): probes carry the
+Don't Fragment bit starting at the egress interface MTU, and ICMP
+Fragmentation Needed / Packet Too Big replies (IPv4 and IPv6) shrink the
+probe until the path is measured. Works with `--protocol icmp` (default)
+and `udp`; TCP SYN probes have a fixed size and are not supported.
+
 ```
- 1  192.168.1.1  0.87ms 0.76ms 0.60ms
- 2  80.10.255.25  [AS3215]  1.57ms 1.05ms 1.81ms  [MTU:1500]
+ 1  192.168.1.1  0.87ms  [MTU:1500]
+ 2  80.10.255.25  [AS3215]  1.57ms  [MTU:1500]
+ 3  10.20.0.1  [AS3215]  5.42ms  [MTU:1400]
+
+Trace complete: reached 8.8.8.8 in 9 hops
+Path MTU: 1400
 ```
 
-When the probe size exceeds the path MTU, EMSGSIZE is reported locally:
+When a hop silently drops oversized packets without sending ICMP feedback
+(a PMTUD black hole - the classic cause of hanging TLS handshakes and
+stuck downloads), gtrace binary-searches the boundary and flags it:
 ```
- 1  * * *  [MTU:1500]
+ 4  203.0.113.9  12.10ms  [MTU:1400 blackhole]
 ```
+The TUI shows the same as a compact `[MTU:1400!]` marker.
 
 ### IPv6 Traceroute
 
@@ -273,6 +288,7 @@ JSON includes full hop data with ASN, geolocation, timing, and detection results
 ```json
 {
   "target": "8.8.8.8",
+  "pathMtu": 1500,
   "hops": [
     {
       "ttl": 1,
@@ -280,11 +296,14 @@ JSON includes full hop data with ASN, geolocation, timing, and detection results
       "avgRtt": 0.5,
       "lossPercent": 0,
       "nat": true,
-      "mtu": 1500
+      "mtu": 1500,
+      "mtuBlackhole": false
     }
   ]
 }
 ```
+
+`pathMtu` and `mtuBlackhole` appear when MTU discovery ran (`--mtu`).
 
 ### Compare Local vs Remote
 
@@ -319,6 +338,8 @@ gtrace includes a built-in [MCP](https://modelcontextprotocol.io/) server that e
 ### Output Formats
 
 Every tool accepts `format: "text"` (default, human-readable) or `format: "json"`, which returns machine-readable data in the MCP result's `structuredContent` field. `traceroute` and `globalping` also accept `view: "graph"` to render the visual path graph (forks, merges, per-source strands) instead of the classic table; `view` is ignored when `format` is `json`.
+
+The `traceroute` tool's `discover_mtu` parameter runs active per-hop Path MTU Discovery (icmp/udp only): results include each hop's MTU, PMTUD black-hole flags, and the end-to-end `pathMtu`. GlobalPing probes cannot vary packet size, so the `globalping` tool does not support MTU discovery.
 
 ### Setup with Claude Code
 
