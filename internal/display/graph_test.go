@@ -388,3 +388,36 @@ func TestGraphRenderer_NarrowWidth_TruncatesRows(t *testing.T) {
 		t.Error("expected truncated node text to end with ...")
 	}
 }
+
+func TestBuildGraph_ConsecutiveTimeouts_Collapsed(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", true,
+		[]string{"10.0.0.1"}, nil, nil, nil, []string{"9.9.9.9"})
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	// src + hop1 + one collapsed timeout node + target
+	if len(g.nodes) != 4 {
+		t.Fatalf("expected consecutive timeouts collapsed into one node, got %d nodes", len(g.nodes))
+	}
+	n := g.nodes["t:0:2"]
+	if n == nil || n.count != 3 {
+		t.Fatalf("expected timeout node spanning 3 hops, got %+v", n)
+	}
+	if g.edges[[2]string{"t:0:2", "9.9.9.9"}] == nil {
+		t.Error("expected collapsed node chained to next responding hop")
+	}
+}
+
+func TestGraphRenderer_CollapsedTimeouts_ShowCount(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", true,
+		[]string{"10.0.0.1"}, nil, nil, nil, []string{"9.9.9.9"})
+	buf := new(bytes.Buffer)
+	r := NewGraphRenderer(buf, true)
+
+	if err := r.Render([]*hop.TraceResult{tr}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "(no response ×3)") {
+		t.Errorf("expected collapsed timeout count in output:\n%s", buf.String())
+	}
+}

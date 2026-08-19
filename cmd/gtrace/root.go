@@ -325,6 +325,11 @@ func runTrace(cmd *cobra.Command, cfg *Config) error {
 		return runCompareMode(ctx, cmd, cfg)
 	}
 
+	// Graph mode: one-shot trace(s) rendered as a path DAG
+	if cfg.Graph {
+		return runGraphMode(ctx, cmd, cfg)
+	}
+
 	var result *hop.TraceResult
 	var err error
 
@@ -1033,8 +1038,57 @@ func runCompareMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error 
 
 	fmt.Fprintln(cmd.OutOrStdout())
 
+	if cfg.Graph {
+		return display.NewGraphRenderer(cmd.OutOrStdout(), cfg.NoColor).Render(sources)
+	}
+
 	renderer := display.NewCompareRenderer(cmd.OutOrStdout(), cfg.NoColor)
 	return renderer.RenderAll(sources)
+}
+
+// runGraphMode runs one-shot trace(s) and renders the path graph.
+func runGraphMode(ctx context.Context, cmd *cobra.Command, cfg *Config) error {
+	var sources []*hop.TraceResult
+
+	if cfg.From != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Tracing to %s from %s via GlobalPing...\n", cfg.Target, cfg.From)
+		results, err := runGlobalPingTraceForCompare(ctx, cmd.OutOrStdout(), cfg)
+		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(cmd.OutOrStdout(), "\nTrace interrupted")
+				return nil
+			}
+			return err
+		}
+		sources = results
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "Tracing to %s...\n", cfg.Target)
+		result, err := runLocalTraceForCompare(ctx, cfg)
+		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(cmd.OutOrStdout(), "\nTrace interrupted")
+				return nil
+			}
+			return err
+		}
+		result.Source = "Local"
+		result.Target = cfg.Target
+		sources = []*hop.TraceResult{result}
+	}
+
+	fmt.Fprintln(cmd.OutOrStdout())
+	if err := display.NewGraphRenderer(cmd.OutOrStdout(), cfg.NoColor).Render(sources); err != nil {
+		return err
+	}
+
+	if cfg.Output != "" {
+		format := export.Format(cfg.Format)
+		if err := export.ExportToFile(cfg.Output, format, sources[len(sources)-1]); err != nil {
+			return fmt.Errorf("failed to export: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "\nResults exported to %s\n", cfg.Output)
+	}
+	return nil
 }
 
 // runLocalTraceForCompare runs a local trace for compare mode (simple output, no TUI).

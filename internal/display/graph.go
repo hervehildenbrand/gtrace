@@ -26,6 +26,7 @@ type graphNode struct {
 	nat       bool
 	sources   map[int]bool // source indices whose path crosses this node
 	depth     int          // max TTL across sources (0 for source nodes)
+	count     int          // consecutive silent hops collapsed into a timeout node
 	isSource  bool
 	isTarget  bool
 	isTimeout bool
@@ -137,11 +138,18 @@ func buildGraph(results []*hop.TraceResult) *pathGraph {
 
 		visits := map[string]int{} // per-source IP revisit counter (loop guard)
 		prev := []string{srcKey}
-		for _, h := range hops {
+		for hi := 0; hi < len(hops); hi++ {
+			h := hops[hi]
 			var cur []string
 			if allTimeout(h) {
+				// collapse a run of consecutive silent hops into one node
+				run := 1
+				for hi+run < len(hops) && allTimeout(hops[hi+run]) {
+					run++
+				}
 				key := fmt.Sprintf("t:%d:%d", i, h.TTL)
-				g.touchNode(&graphNode{key: key, label: "*", depth: h.TTL, isTimeout: true}, i)
+				g.touchNode(&graphNode{key: key, label: "*", depth: hops[hi+run-1].TTL, count: run, isTimeout: true}, i)
+				hi += run - 1
 				cur = []string{key}
 			} else {
 				ips := distinctIPs(h)
@@ -471,6 +479,9 @@ func nodeText(n *graphNode, g *pathGraph, nSources int) string {
 		return n.label
 	}
 	if n.isTimeout {
+		if n.count > 1 {
+			return fmt.Sprintf("(no response ×%d)", n.count)
+		}
 		return "(no response)"
 	}
 	parts := []string{n.label}

@@ -107,6 +107,13 @@ sudo gtrace 8.8.8.8
 # Compare local and remote traces
 sudo gtrace 8.8.8.8 --compare --from "New York,London"
 
+# Visual path graph (git-log style DAG): paths from multiple probes
+# converging toward the destination, convergence points highlighted
+gtrace 8.8.8.8 --graph --from "Paris;Frankfurt;Tokyo"
+
+# Path graph of the local trace (shows ECMP forks)
+sudo gtrace 8.8.8.8 --graph
+
 # IPv6 traceroute
 sudo gtrace -6 google.com --simple
 
@@ -128,6 +135,7 @@ sudo gtrace -6 google.com --compare --from Paris
 | `--packets` | Probes per hop | 3 |
 | `--timeout` | Per-hop timeout | 500ms |
 | `--simple` | Simple output (no TUI) | false |
+| `--graph` | Render path graph after trace (no TUI) | false |
 
 ### Detection & Discovery
 
