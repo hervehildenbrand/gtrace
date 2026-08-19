@@ -3,6 +3,7 @@
 package trace
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"syscall"
@@ -53,13 +54,11 @@ func getSocketError(fd socketFD) (int, error) {
 	return syscall.GetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_ERROR)
 }
 
-// isEMSGSIZE checks if an error is EMSGSIZE (message too long).
-// This indicates the packet exceeds the path MTU when DF bit is set.
+// isEMSGSIZE checks if an error is EMSGSIZE (message too long), including
+// errno wrapped by the net package (OpError/SyscallError chains).
+// This indicates the packet exceeds a local size limit when DF bit is set.
 func isEMSGSIZE(err error) bool {
-	if err == nil {
-		return false
-	}
-	return err == syscall.EMSGSIZE
+	return errors.Is(err, syscall.EMSGSIZE)
 }
 
 // socketFDInt returns the underlying integer file descriptor (for select).
