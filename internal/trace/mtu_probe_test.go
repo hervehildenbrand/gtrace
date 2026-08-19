@@ -257,3 +257,22 @@ func TestBuildEchoRequestForIP_MTUSizePadsToIPLayerSize(t *testing.T) {
 		t.Errorf("v6 ICMP message = %d bytes, want %d (1280 total - IP header)", len(b6), want)
 	}
 }
+
+func TestMTUProbeState_FragNeededEchoingProbeSize_FallsBackToSearch(t *testing.T) {
+	// A broken router reports the probe size itself as the next-hop MTU,
+	// which is no information at all: distrust it and binary search.
+	s := NewMTUProbeState(1500, MinMTU)
+	respond := pathWithMTU(1400, func(size int) MTUProbeEvent {
+		return MTUProbeEvent{Type: MTUEventFragNeeded, ReportedMTU: size}
+	})
+	d, probes := driveTTL(t, s, respond)
+	if d.MTU < 1400-MTUConvergence || d.MTU > 1400 {
+		t.Errorf("MTU = %d, want within %d of 1400", d.MTU, MTUConvergence)
+	}
+	if d.Blackhole {
+		t.Error("Blackhole = true, want false")
+	}
+	if probes > MTUMaxProbesPerTTL {
+		t.Errorf("probes = %d, want <= %d", probes, MTUMaxProbesPerTTL)
+	}
+}
