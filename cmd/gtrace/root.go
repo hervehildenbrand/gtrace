@@ -44,6 +44,7 @@ type Config struct {
 	AlertLoss    string
 	Simple   bool
 	NoColor  bool
+	Graph    bool // Render path graph after trace
 	Output   string
 	Format   string
 	APIKey   string
@@ -162,6 +163,14 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 				return fmt.Errorf("-4/--ipv4 and -6/--ipv6 are mutually exclusive")
 			}
 
+			// --graph renders one-shot traces only
+			if cfg.Graph && cfg.Monitor {
+				return fmt.Errorf("--graph cannot be combined with --monitor")
+			}
+			if cfg.Graph && len(args) > 1 {
+				return fmt.Errorf("--graph supports a single target (got %d)", len(args))
+			}
+
 			// Validate diagnostic flags
 			if cfg.ECMPFlows < 0 {
 				return fmt.Errorf("--ecmp-flows must be >= 0")
@@ -248,6 +257,7 @@ rich hop enrichment (ASN, geo, hostnames), and real-time MTR-style TUI.`,
 	// Display flags
 	cmd.Flags().BoolVar(&cfg.Simple, "simple", false, "Simple output (no TUI)")
 	cmd.Flags().BoolVar(&cfg.NoColor, "no-color", false, "Disable colors")
+	cmd.Flags().BoolVar(&cfg.Graph, "graph", false, "Render path graph after trace (no TUI)")
 
 	// Export flags
 	cmd.Flags().StringVarP(&cfg.Output, "output", "o", "", "Export to file (json/csv/txt)")
