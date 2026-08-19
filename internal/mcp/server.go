@@ -72,6 +72,25 @@ func tracerouteTool() mcp.Tool {
 		mcp.WithBoolean("decode",
 			mcp.Description("Decode transport headers from ICMP error bodies (shows DSCP, DF, TCP flags, port translation)"),
 		),
+		formatParam(),
+		viewParam(),
+	)
+}
+
+// formatParam is the shared output-format parameter: text (default) or
+// structured JSON in the result's structuredContent field.
+func formatParam() mcp.ToolOption {
+	return mcp.WithString("format",
+		mcp.Description("Output format: 'text' (default, human-readable) or 'json' (structured content for programmatic use)"),
+		mcp.Enum("text", "json"),
+	)
+}
+
+// viewParam selects the text rendering for trace-shaped results.
+func viewParam() mcp.ToolOption {
+	return mcp.WithString("view",
+		mcp.Description("Text rendering: 'table' (default, classic per-hop table) or 'graph' (visual path graph showing forks, merges, and per-source strands). Ignored when format=json."),
+		mcp.Enum("table", "graph"),
 	)
 }
 
@@ -107,6 +126,7 @@ func mtrTool() mcp.Tool {
 		mcp.WithBoolean("decode",
 			mcp.Description("Decode transport headers from ICMP error bodies (shows DSCP, DF, TCP flags, port translation)"),
 		),
+		formatParam(),
 	)
 }
 
@@ -140,6 +160,7 @@ Examples:
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of probes to return (default: 20)"),
 		),
+		formatParam(),
 	)
 }
 
@@ -186,6 +207,8 @@ Tip: When ICMP is filtered, try protocol="tcp" with port=80 or port=443 for bett
 		mcp.WithBoolean("ipv6",
 			mcp.Description("Force IPv6 only"),
 		),
+		formatParam(),
+		viewParam(),
 	)
 }
 
@@ -196,6 +219,7 @@ func asnLookupTool() mcp.Tool {
 			mcp.Required(),
 			mcp.Description("IP address to look up (IPv4 or IPv6)"),
 		),
+		formatParam(),
 	)
 }
 
@@ -206,6 +230,7 @@ func geoLookupTool() mcp.Tool {
 			mcp.Required(),
 			mcp.Description("IP address to look up (IPv4 or IPv6)"),
 		),
+		formatParam(),
 	)
 }
 
@@ -216,6 +241,7 @@ func reverseDNSTool() mcp.Tool {
 			mcp.Required(),
 			mcp.Description("IP address to look up (IPv4 or IPv6)"),
 		),
+		formatParam(),
 	)
 }
 
@@ -255,6 +281,7 @@ Examples:
 		mcp.WithBoolean("ipv6",
 			mcp.Description("Force IPv6 only"),
 		),
+		formatParam(),
 	)
 }
 
@@ -302,5 +329,6 @@ Examples:
 		mcp.WithBoolean("ipv6",
 			mcp.Description("Force IPv6 only"),
 		),
+		formatParam(),
 	)
 }

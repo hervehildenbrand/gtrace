@@ -386,3 +386,62 @@ func TestRDNSResult_TextDefault_MatchesFormat(t *testing.T) {
 		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func allTools() map[string]mcplib.Tool {
+	return map[string]mcplib.Tool{
+		"list_probes": listProbesTool(),
+		"traceroute":  tracerouteTool(),
+		"mtr":         mtrTool(),
+		"globalping":  globalPingTool(),
+		"ping":        pingTool(),
+		"dns":         dnsTool(),
+		"asn_lookup":  asnLookupTool(),
+		"geo_lookup":  geoLookupTool(),
+		"reverse_dns": reverseDNSTool(),
+	}
+}
+
+func paramEnum(t *testing.T, tool mcplib.Tool, param string) []string {
+	t.Helper()
+	prop, ok := tool.InputSchema.Properties[param]
+	if !ok {
+		return nil
+	}
+	m, ok := prop.(map[string]any)
+	if !ok {
+		t.Fatalf("%s property is %T, want map", param, prop)
+	}
+	raw, _ := m["enum"].([]string)
+	return raw
+}
+
+func TestListTools_HaveFormatParam(t *testing.T) {
+	for name, tool := range allTools() {
+		enum := paramEnum(t, tool, "format")
+		if enum == nil {
+			t.Errorf("tool %s missing 'format' parameter", name)
+			continue
+		}
+		if len(enum) != 2 || enum[0] != "text" || enum[1] != "json" {
+			t.Errorf("tool %s format enum = %v, want [text json]", name, enum)
+		}
+	}
+}
+
+func TestListTools_ViewParamOnlyOnTraceTools(t *testing.T) {
+	withView := map[string]bool{"traceroute": true, "globalping": true}
+	for name, tool := range allTools() {
+		enum := paramEnum(t, tool, "view")
+		if withView[name] {
+			if enum == nil {
+				t.Errorf("tool %s missing 'view' parameter", name)
+				continue
+			}
+			if len(enum) != 2 || enum[0] != "table" || enum[1] != "graph" {
+				t.Errorf("tool %s view enum = %v, want [table graph]", name, enum)
+			}
+		} else if enum != nil {
+			t.Errorf("tool %s must not have a 'view' parameter", name)
+		}
+	}
+}
