@@ -674,6 +674,8 @@ func (r *GraphRenderer) Render(results []*hop.TraceResult) error {
 		fmt.Fprintf(r.writer, "Path graph to %s, %d %s\n\n", target, len(results), srcWord)
 	}
 
+	r.renderASOverview(results)
+
 	for _, row := range rows {
 		var b strings.Builder
 		for _, c := range row.cells {
