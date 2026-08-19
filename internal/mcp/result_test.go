@@ -105,3 +105,63 @@ func TestTracerouteResult_JSONIgnoresView(t *testing.T) {
 		t.Error("format=json must win over view=graph")
 	}
 }
+
+// resultTestGlobalPing fabricates two probe results with distinct sources.
+func resultTestGlobalPing() []*globalPingProbeResult {
+	mk := func(source, hopIP string) *hop.TraceResult {
+		tr := hop.NewTraceResult("example.com", "93.184.216.34")
+		tr.Protocol = "ICMP"
+		tr.Source = source
+		tr.ReachedTarget = true
+		h := hop.NewHop(1)
+		h.AddProbe(net.ParseIP(hopIP), 5*time.Millisecond)
+		tr.AddHop(h)
+		return tr
+	}
+	return []*globalPingProbeResult{
+		{probe: probeInfo{City: "Paris", Country: "FR", ASN: 12322, Network: "Free SAS"}, trace: mk("Paris, FR", "10.0.0.1")},
+		{probe: probeInfo{City: "Tokyo", Country: "JP", ASN: 2497, Network: "IIJ"}, trace: mk("Tokyo, JP", "10.0.1.1")},
+	}
+}
+
+func TestGlobalPingResult_TextDefault_MatchesFormat(t *testing.T) {
+	results := resultTestGlobalPing()
+
+	res := globalPingResult(results, "text", "table")
+
+	if got, want := resultText(t, res), formatGlobalPingResults(results); got != want {
+		t.Errorf("text output changed:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	if res.StructuredContent != nil {
+		t.Error("text format must not set structuredContent")
+	}
+}
+
+func TestGlobalPingResult_JSON_ExportedTracePerProbe(t *testing.T) {
+	results := resultTestGlobalPing()
+
+	res := globalPingResult(results, "json", "table")
+
+	traces, ok := res.StructuredContent.([]*export.ExportedTrace)
+	if !ok {
+		t.Fatalf("structuredContent is %T, want []*export.ExportedTrace", res.StructuredContent)
+	}
+	if len(traces) != 2 {
+		t.Fatalf("traces = %d, want 2", len(traces))
+	}
+	if traces[0].Source != "Paris, FR" || traces[1].Source != "Tokyo, JP" {
+		t.Errorf("sources = %q, %q; want probe locations", traces[0].Source, traces[1].Source)
+	}
+}
+
+func TestGlobalPingResult_GraphView_ContainsLaneGlyphs(t *testing.T) {
+	res := globalPingResult(resultTestGlobalPing(), "text", "graph")
+
+	text := resultText(t, res)
+	if !strings.Contains(text, "●") {
+		t.Errorf("graph view missing hop glyph ●:\n%s", text)
+	}
+	if strings.Contains(text, "\x1b[") {
+		t.Error("graph view must not contain ANSI escapes")
+	}
+}

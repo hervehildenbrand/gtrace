@@ -37,6 +37,26 @@ func graphResult(results []*hop.TraceResult) *mcp.CallToolResult {
 	return mcp.NewToolResultText(buf.String())
 }
 
+// globalPingResult renders multi-probe GlobalPing traces as a CallToolResult.
+func globalPingResult(results []*globalPingProbeResult, format, view string) *mcp.CallToolResult {
+	if format == "json" {
+		traces := make([]*export.ExportedTrace, 0, len(results))
+		for _, pr := range results {
+			traces = append(traces, export.ConvertTrace(pr.trace))
+		}
+		summary := fmt.Sprintf("GlobalPing traceroute from %d probes", len(results))
+		return mcp.NewToolResultStructured(traces, summary)
+	}
+	if view == "graph" {
+		traces := make([]*hop.TraceResult, 0, len(results))
+		for _, pr := range results {
+			traces = append(traces, pr.trace)
+		}
+		return graphResult(traces)
+	}
+	return mcp.NewToolResultText(formatGlobalPingResults(results))
+}
+
 // traceSummary is the short text fallback accompanying structured trace output.
 func traceSummary(tr *hop.TraceResult) string {
 	reached := "target not reached"
