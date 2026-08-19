@@ -35,14 +35,28 @@ func (t *ICMPTracer) Trace(ctx context.Context, target net.IP, callback HopCallb
 	result.Protocol = string(ProtocolICMP)
 	result.StartTime = time.Now()
 
-	// Open ICMP connection based on IP version
+	// Open ICMP connection based on IP version. net.ListenPacket (rather
+	// than icmp.ListenPacket) exposes the fd so the DF bit can be set.
 	proto := ICMPProtocol(target)
 	listenAddr := ListenAddress(target)
-	conn, err := icmp.ListenPacket(proto, listenAddr)
+	pc, err := net.ListenPacket(proto, listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open ICMP socket: %w (try running with sudo)", err)
 	}
-	defer conn.Close()
+	defer pc.Close()
+
+	conn := &icmpConn{pc: pc}
+	if IsIPv6(target) {
+		conn.p6 = ipv6.NewPacketConn(pc)
+	} else {
+		conn.p4 = ipv4.NewPacketConn(pc)
+	}
+
+	if t.config.DiscoverMTU {
+		if err := applyDontFragment(pc, IsIPv6(target)); err != nil {
+			return nil, fmt.Errorf("failed to set DF bit: %w", err)
+		}
+	}
 
 	for ttl := 1; ttl <= t.config.MaxHops; ttl++ {
 		select {
@@ -158,18 +172,25 @@ func ExtractIPID(data []byte) uint16 {
 	return uint16(data[4])<<8 | uint16(data[5])
 }
 
+// icmpConn wraps the raw ICMP socket with version-specific control access.
+type icmpConn struct {
+	pc net.PacketConn
+	p4 *ipv4.PacketConn // non-nil for IPv4 targets
+	p6 *ipv6.PacketConn // non-nil for IPv6 targets
+}
+
 // sendProbe sends a single ICMP probe and waits for response.
 // Supports both IPv4 and IPv6 targets. flowID > 0 varies the payload for ECMP diversity.
-func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, flowID int) (*probeResult, error) {
+func (t *ICMPTracer) sendProbe(conn *icmpConn, target net.IP, ttl, seq, flowID int) (*probeResult, error) {
 	isV6 := IsIPv6(target)
 
 	// Set TTL/Hop Limit for this probe
 	if isV6 {
-		if err := conn.IPv6PacketConn().SetHopLimit(ttl); err != nil {
+		if err := conn.p6.SetHopLimit(ttl); err != nil {
 			return nil, fmt.Errorf("failed to set hop limit: %w", err)
 		}
 	} else {
-		if err := conn.IPv4PacketConn().SetTTL(ttl); err != nil {
+		if err := conn.p4.SetTTL(ttl); err != nil {
 			return nil, fmt.Errorf("failed to set TTL: %w", err)
 		}
 	}
@@ -183,14 +204,14 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 
 	start := time.Now()
 
-	_, err = conn.WriteTo(msgBytes, &net.IPAddr{IP: target})
+	_, err = conn.pc.WriteTo(msgBytes, &net.IPAddr{IP: target})
 	if err != nil {
 		return nil, fmt.Errorf("failed to send ICMP: %w", err)
 	}
 
 	// Set read deadline
 	deadline := start.Add(t.config.Timeout)
-	if err := conn.SetReadDeadline(deadline); err != nil {
+	if err := conn.pc.SetReadDeadline(deadline); err != nil {
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
@@ -201,11 +222,12 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 
 	// Enable TTL control messages for NAT detection (IPv4 only)
 	if !isV6 && t.config.DetectNAT {
-		_ = conn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
+		_ = conn.p4.SetControlMessage(ipv4.FlagTTL, true)
 	}
 
-	// Wait for response
-	reply := make([]byte, 1500)
+	// Wait for response. Echo replies mirror the probe size, which in MTU
+	// mode can exceed 1500, so size for any IP packet.
+	reply := make([]byte, 65535)
 	for {
 		var n int
 		var peer net.Addr
@@ -213,12 +235,12 @@ func (t *ICMPTracer) sendProbe(conn *icmp.PacketConn, target net.IP, ttl, seq, f
 
 		if !isV6 && t.config.DetectNAT {
 			var cm *ipv4.ControlMessage
-			n, cm, peer, err = conn.IPv4PacketConn().ReadFrom(reply)
+			n, cm, peer, err = conn.p4.ReadFrom(reply)
 			if cm != nil {
 				responseTTL = cm.TTL
 			}
 		} else {
-			n, peer, err = conn.ReadFrom(reply)
+			n, peer, err = conn.pc.ReadFrom(reply)
 		}
 		if err != nil {
 			return nil, err

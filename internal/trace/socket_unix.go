@@ -3,6 +3,8 @@
 package trace
 
 import (
+	"fmt"
+	"net"
 	"syscall"
 )
 
@@ -63,4 +65,29 @@ func isEMSGSIZE(err error) bool {
 // socketFDInt returns the underlying integer file descriptor (for select).
 func socketFDInt(fd socketFD) int {
 	return int(fd)
+}
+
+// applyDontFragment sets the probing DF option on a net.PacketConn whose
+// concrete type exposes its file descriptor (net.IPConn, net.UDPConn).
+func applyDontFragment(pc net.PacketConn, ipv6 bool) error {
+	sc, ok := pc.(syscall.Conn)
+	if !ok {
+		return fmt.Errorf("connection type %T does not expose a file descriptor", pc)
+	}
+	raw, err := sc.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var optErr error
+	err = raw.Control(func(fd uintptr) {
+		if ipv6 {
+			optErr = setDontFragmentV6(socketFD(fd))
+		} else {
+			optErr = setDontFragmentProbe(socketFD(fd))
+		}
+	})
+	if err != nil {
+		return err
+	}
+	return optErr
 }

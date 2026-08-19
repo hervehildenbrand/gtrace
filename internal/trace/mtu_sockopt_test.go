@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"net"
 	"runtime"
 	"syscall"
 	"testing"
@@ -52,5 +53,29 @@ func TestGetSocketMTU_ConnectedSocket(t *testing.T) {
 		if err == nil {
 			t.Errorf("getSocketMTU() err = nil, want unsupported error on %s", runtime.GOOS)
 		}
+	}
+}
+
+func TestApplyDontFragment_IPv4PacketConn(t *testing.T) {
+	pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer pc.Close()
+
+	if err := applyDontFragment(pc, false); err != nil {
+		t.Errorf("applyDontFragment(v4) = %v, want nil", err)
+	}
+}
+
+func TestApplyDontFragment_IPv6PacketConn(t *testing.T) {
+	pc, err := net.ListenPacket("udp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	defer pc.Close()
+
+	if err := applyDontFragment(pc, true); err != nil {
+		t.Errorf("applyDontFragment(v6) = %v, want nil", err)
 	}
 }
