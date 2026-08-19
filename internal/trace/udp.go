@@ -43,6 +43,11 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 	}
 	defer icmpConn.Close()
 
+	var mtuState *MTUProbeState
+	if t.config.DiscoverMTU {
+		mtuState = newMTUStateForTarget(target)
+	}
+
 	probeNum := 0
 	for ttl := 1; ttl <= t.config.MaxHops; ttl++ {
 		select {
@@ -59,13 +64,26 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 			probeCount = t.config.ECMPFlows
 		}
 
-		for i := 0; i < probeCount; i++ {
+		if mtuState != nil {
+			// Active MTU discovery drives its own probe loop for this TTL.
+			mtuState.NextTTL()
+			d, pr := runMTUDiscovery(mtuState, func(size int) (MTUProbeEvent, *probeResult) {
+				probeNum++
+				pr, err := t.sendProbe(icmpConn, target, ttl, probeNum, size)
+				return classifyMTUProbe(pr, err), pr
+			})
+			if recordMTUOutcome(h, d, pr, target) {
+				reached = true
+			}
+		}
+
+		for i := 0; mtuState == nil && i < probeCount; i++ {
 			probeNum++
 			flowID := 0
 			if t.config.ECMPFlows > 0 {
 				flowID = i + 1
 			}
-			pr, err := t.sendProbe(icmpConn, target, ttl, probeNum)
+			pr, err := t.sendProbe(icmpConn, target, ttl, probeNum, 0)
 			if err != nil {
 				if isTimeout(err) {
 					h.AddTimeout()
@@ -133,13 +151,18 @@ func (t *UDPTracer) Trace(ctx context.Context, target net.IP, callback HopCallba
 		}
 	}
 
+	if mtuState != nil && result.ReachedTarget {
+		result.PathMTU = mtuState.Candidate
+	}
+
 	result.EndTime = time.Now()
 	return result, nil
 }
 
 // sendProbe sends a single UDP probe and waits for ICMP response.
-// Supports both IPv4 and IPv6 targets.
-func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq int) (*probeResult, error) {
+// Supports both IPv4 and IPv6 targets. mtuSize > 0 pads the probe to that
+// total IP-layer size.
+func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq, mtuSize int) (*probeResult, error) {
 	port := t.getPort(seq)
 
 	// Create UDP socket with specific TTL/Hop Limit
@@ -157,10 +180,16 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
 	}
 
-	// Set Don't Fragment bit for MTU discovery (IPv4 only)
-	if t.config.DiscoverMTU && !IsIPv6(target) {
-		if err := setDontFragment(fd); err != nil {
-			return nil, fmt.Errorf("failed to set DF bit: %w", err)
+	// Set Don't Fragment bit for MTU discovery
+	if t.config.DiscoverMTU {
+		var dfErr error
+		if IsIPv6(target) {
+			dfErr = setDontFragmentV6(fd)
+		} else {
+			dfErr = setDontFragmentProbe(fd)
+		}
+		if dfErr != nil {
+			return nil, fmt.Errorf("failed to set DF bit: %w", dfErr)
 		}
 	}
 
@@ -168,15 +197,15 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	sa := buildSockaddr(target, port)
 
 	// Build payload
-	payload := t.buildPayload(ttl, seq)
+	payload := t.buildPayload(ttl, seq, target, mtuSize)
 
 	start := time.Now()
 
 	// Send UDP packet
 	if err := sendToSocket(fd, payload, 0, sa); err != nil {
-		// EMSGSIZE means packet exceeds local interface MTU with DF bit set
-		if t.config.DiscoverMTU && isEMSGSIZE(err) {
-			return &probeResult{MTU: StandardMTU}, nil
+		if isEMSGSIZE(err) {
+			// Returned unwrapped so MTU discovery can classify it.
+			return nil, err
 		}
 		return nil, fmt.Errorf("failed to send UDP: %w", err)
 	}
@@ -251,6 +280,16 @@ func (t *UDPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 			}
 		}
 
+		// Check for Packet Too Big (IPv6 path MTU discovery)
+		if isPacketTooBig(rm.Type, target) {
+			if body, ok := rm.Body.(*icmp.PacketTooBig); ok {
+				if t.isOurProbeForIP(body.Data, port, target) {
+					mtu, _ := ParseMTUFromICMPv6PacketTooBig(reply[:n])
+					return &probeResult{IP: peerIP, RTT: rtt, ResponseTTL: responseTTL, MTU: mtu, ICMPType: 2, ICMPCode: rm.Code}, nil
+				}
+			}
+		}
+
 		// Check for Destination Unreachable (target reached, port unreachable)
 		if isDestUnreachable(rm.Type, target) {
 			if body, ok := rm.Body.(*icmp.DstUnreach); ok {
@@ -291,9 +330,18 @@ func (t *UDPTracer) getPort(seq int) int {
 	return t.config.Port + seq - 1
 }
 
-// buildPayload creates the UDP payload.
-func (t *UDPTracer) buildPayload(ttl, seq int) []byte {
+// buildPayload creates the UDP payload. mtuSize > 0 pads so the packet's
+// total IP-layer size (IP header + UDP header + payload) equals mtuSize.
+func (t *UDPTracer) buildPayload(ttl, seq int, target net.IP, mtuSize int) []byte {
 	payload := []byte(fmt.Sprintf("gtr-%d-%d-%d", time.Now().UnixNano(), ttl, seq))
+
+	if mtuSize > 0 {
+		targetPayload := mtuSize - IPHeaderSize(target) - 8 // UDP header is 8 bytes
+		if targetPayload > len(payload) {
+			payload = append(payload, make([]byte, targetPayload-len(payload))...)
+		}
+		return payload
+	}
 
 	// Pad payload to reach desired probe size (minus IP+UDP header overhead)
 	if t.config.ProbeSize > 0 {

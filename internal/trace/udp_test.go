@@ -43,7 +43,7 @@ func TestUDPTracer_BuildPayload_CreatesValidPayload(t *testing.T) {
 	cfg := DefaultConfig()
 	tracer := NewUDPTracer(cfg)
 
-	payload := tracer.buildPayload(1, 1)
+	payload := tracer.buildPayload(1, 1, net.ParseIP("8.8.8.8"), 0)
 
 	if len(payload) == 0 {
 		t.Error("expected non-empty payload")

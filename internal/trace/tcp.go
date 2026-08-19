@@ -30,6 +30,12 @@ func NewTCPTracer(cfg *Config) *TCPTracer {
 // Trace performs a TCP traceroute to the target IP.
 // Supports both IPv4 and IPv6 targets.
 func (t *TCPTracer) Trace(ctx context.Context, target net.IP, callback HopCallback) (*hop.TraceResult, error) {
+	if t.config.DiscoverMTU {
+		// The kernel builds SYN probes via connect(), so their size cannot
+		// be varied for active discovery.
+		return nil, fmt.Errorf("MTU discovery is not supported with TCP probes; use --protocol icmp or udp")
+	}
+
 	result := hop.NewTraceResult(target.String(), target.String())
 	result.Protocol = string(ProtocolTCP)
 	result.StartTime = time.Now()
@@ -138,13 +144,6 @@ func (t *TCPTracer) sendProbe(icmpConn *icmp.PacketConn, target net.IP, ttl, seq
 	opt := TTLSocketOption(target)
 	if err := setSocketTTL(fd, level, opt, ttl); err != nil {
 		return nil, fmt.Errorf("failed to set TTL/hop limit: %w", err)
-	}
-
-	// Set Don't Fragment bit for MTU discovery (IPv4 only)
-	if t.config.DiscoverMTU && !IsIPv6(target) {
-		if err := setDontFragment(fd); err != nil {
-			return nil, fmt.Errorf("failed to set DF bit: %w", err)
-		}
 	}
 
 	// Set non-blocking
