@@ -1,0 +1,160 @@
+package display
+
+import (
+	"net"
+	"testing"
+	"time"
+
+	"github.com/hervehildenbrand/gtrace/pkg/hop"
+)
+
+// testTrace builds a TraceResult where each element of hopIPs is the list of
+// responding IPs at that TTL (nil element = all-timeout hop).
+func testTrace(source, target, targetIP string, reached bool, hopIPs ...[]string) *hop.TraceResult {
+	tr := hop.NewTraceResult(target, targetIP)
+	tr.Source = source
+	tr.ReachedTarget = reached
+	for i, ips := range hopIPs {
+		h := hop.NewHop(i + 1)
+		if len(ips) == 0 {
+			h.AddTimeout()
+		} else {
+			for _, ip := range ips {
+				h.AddProbe(net.ParseIP(ip), 10*time.Millisecond)
+			}
+		}
+		tr.AddHop(h)
+	}
+	return tr
+}
+
+func TestBuildGraph_SingleLinearPath_NodesAndEdges(t *testing.T) {
+	tr := testTrace("", "dns.example", "8.8.8.8", true,
+		[]string{"10.0.0.1"}, []string{"10.0.0.2"}, []string{"8.8.8.8"})
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	// source node + 3 hop nodes
+	if len(g.nodes) != 4 {
+		t.Fatalf("expected 4 nodes, got %d", len(g.nodes))
+	}
+	src := g.nodes["src:0"]
+	if src == nil || !src.isSource || src.label != "Local" {
+		t.Fatalf("expected synthetic source node labeled Local, got %+v", src)
+	}
+	for _, want := range [][2]string{
+		{"src:0", "10.0.0.1"}, {"10.0.0.1", "10.0.0.2"}, {"10.0.0.2", "8.8.8.8"},
+	} {
+		if g.edges[want] == nil {
+			t.Errorf("missing edge %v -> %v", want[0], want[1])
+		}
+	}
+	tgt := g.nodes["8.8.8.8"]
+	if tgt == nil || !tgt.isTarget {
+		t.Error("expected 8.8.8.8 to be marked as target")
+	}
+	if g.nodes["10.0.0.2"].depth != 2 {
+		t.Errorf("expected depth 2 for second hop, got %d", g.nodes["10.0.0.2"].depth)
+	}
+}
+
+func TestBuildGraph_ECMPHop_SiblingNodes(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", true,
+		[]string{"10.0.0.1"}, []string{"172.16.0.1", "172.16.0.2"}, []string{"9.9.9.9"})
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	if g.nodes["172.16.0.1"] == nil || g.nodes["172.16.0.2"] == nil {
+		t.Fatal("expected one node per ECMP sibling IP")
+	}
+	// fan out from hop 1 and reconverge on hop 3
+	for _, want := range [][2]string{
+		{"10.0.0.1", "172.16.0.1"}, {"10.0.0.1", "172.16.0.2"},
+		{"172.16.0.1", "9.9.9.9"}, {"172.16.0.2", "9.9.9.9"},
+	} {
+		if g.edges[want] == nil {
+			t.Errorf("missing edge %v -> %v", want[0], want[1])
+		}
+	}
+}
+
+func TestBuildGraph_ECMPHop_PerIPRTT(t *testing.T) {
+	tr := hop.NewTraceResult("t", "9.9.9.9")
+	h := hop.NewHop(1)
+	h.AddProbe(net.ParseIP("172.16.0.1"), 10*time.Millisecond)
+	h.AddProbe(net.ParseIP("172.16.0.2"), 30*time.Millisecond)
+	tr.AddHop(h)
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	if got := g.nodes["172.16.0.1"].rtt; got != 10*time.Millisecond {
+		t.Errorf("expected per-IP RTT 10ms, got %v", got)
+	}
+	if got := g.nodes["172.16.0.2"].rtt; got != 30*time.Millisecond {
+		t.Errorf("expected per-IP RTT 30ms, got %v", got)
+	}
+}
+
+func TestBuildGraph_TwoSources_SharedNodeMerged(t *testing.T) {
+	a := testTrace("Paris, FR", "t", "8.8.8.8", true,
+		[]string{"10.1.0.1"}, []string{"8.8.4.1"}, []string{"8.8.8.8"})
+	b := testTrace("Tokyo, JP", "t", "8.8.8.8", true,
+		[]string{"10.2.0.1"}, []string{"10.2.0.2"}, []string{"8.8.4.1"}, []string{"8.8.8.8"})
+
+	g := buildGraph([]*hop.TraceResult{a, b})
+
+	shared := g.nodes["8.8.4.1"]
+	if shared == nil {
+		t.Fatal("expected shared node 8.8.4.1")
+	}
+	if !shared.sources[0] || !shared.sources[1] {
+		t.Errorf("expected node shared by both sources, got %v", shared.sources)
+	}
+	if shared.depth != 3 {
+		t.Errorf("expected depth = max TTL (3), got %d", shared.depth)
+	}
+	if g.sourceLabels[0] != "Paris, FR" || g.sourceLabels[1] != "Tokyo, JP" {
+		t.Errorf("unexpected source labels %v", g.sourceLabels)
+	}
+}
+
+func TestBuildGraph_RoutingLoop_UniqueKeys(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", false,
+		[]string{"10.0.0.1"}, []string{"10.0.0.2"}, []string{"10.0.0.1"})
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	if g.nodes["10.0.0.1"] == nil || g.nodes["10.0.0.1#1"] == nil {
+		t.Fatalf("expected loop revisit to get a distinct key, nodes: %d", len(g.nodes))
+	}
+	if g.edges[[2]string{"10.0.0.2", "10.0.0.1#1"}] == nil {
+		t.Error("expected edge to the revisited node's unique key")
+	}
+}
+
+func TestBuildGraph_TrailingTimeouts_Trimmed(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", false,
+		[]string{"10.0.0.1"}, []string{"10.0.0.2"}, nil, nil)
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	// src + 2 responding hops only; trailing timeout hops trimmed
+	if len(g.nodes) != 3 {
+		t.Fatalf("expected trailing timeouts trimmed (3 nodes), got %d", len(g.nodes))
+	}
+}
+
+func TestBuildGraph_IntermediateTimeout_StarNode(t *testing.T) {
+	tr := testTrace("", "t", "9.9.9.9", true,
+		[]string{"10.0.0.1"}, nil, []string{"9.9.9.9"})
+
+	g := buildGraph([]*hop.TraceResult{tr})
+
+	n := g.nodes["t:0:2"]
+	if n == nil || !n.isTimeout {
+		t.Fatal("expected intermediate timeout node t:0:2")
+	}
+	if g.edges[[2]string{"10.0.0.1", "t:0:2"}] == nil || g.edges[[2]string{"t:0:2", "9.9.9.9"}] == nil {
+		t.Error("expected timeout node chained between neighbors")
+	}
+}
